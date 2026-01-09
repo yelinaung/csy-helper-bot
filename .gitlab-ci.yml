@@ -16,6 +16,7 @@ secret_detection:
 
 check_secrets:
   stage: test-validate
+  image: apteno/alpine-jq:latest
   tags:
     - playground-bravo
   needs:

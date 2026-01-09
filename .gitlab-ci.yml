@@ -1,7 +1,7 @@
 stages:
+- static-test
+- validate
 - build
-- test-validate
-- plan
 
 variables:
   SECRET_DETECTION_ENABLED: 'true'
@@ -10,12 +10,12 @@ include:
 - template: Security/Secret-Detection.gitlab-ci.yml
 
 secret_detection:
-  stage: test-validate
+  stage: static-validate
   tags:
     - playground-bravo
 
 check_secrets:
-  stage: test-validate
+  stage: validate
   image: apteno/alpine-jq:latest
   tags:
     - playground-bravo
@@ -40,4 +40,22 @@ check_secrets:
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+build_image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  tags:
+    - playground-bravo
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA -t $CI_REGISTRY_IMAGE:latest .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
 

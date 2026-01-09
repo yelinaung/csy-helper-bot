@@ -1,6 +1,7 @@
 stages:
 - static-test
 - validate
+- test
 - build
 
 variables:
@@ -41,6 +42,19 @@ check_secrets:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
+test:
+  stage: test
+  image: golang:1.23-alpine
+  tags:
+    - playground-bravo
+  needs:
+    - job: check_secrets
+  script:
+    - go test -v ./...
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
 build_image:
   stage: build
   image:
@@ -49,7 +63,7 @@ build_image:
   tags:
     - playground-bravo
   needs:
-    - job: check_secrets
+    - job: test
   script:
     - /kaniko/executor
       --context "${CI_PROJECT_DIR}"

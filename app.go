@@ -84,6 +84,13 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: update.Message.Chat.ID,
+		Text:   formatLeetCodeMessage(question),
+	})
+}
+
+func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	difficultyEmoji := map[string]string{
 		"Easy":   "🟩",
 		"Medium": "🟨",
@@ -94,13 +101,8 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	date := time.Now().Format("2006-01-02")
 	url := fmt.Sprintf("https://leetcode.com/problems/%s/", question.TitleSlug)
 
-	text := fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",
+	return fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",
 		date, question.Title, question.Difficulty, emoji, url)
-
-	b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   text,
-	})
 }
 
 type LeetCodeQuestion struct {
@@ -125,7 +127,13 @@ type graphQLResponse struct {
 	} `json:"data"`
 }
 
+const leetCodeGraphQLURL = "https://leetcode.com/graphql"
+
 func fetchDailyLeetCode() (*LeetCodeQuestion, error) {
+	return fetchDailyLeetCodeFromURL(leetCodeGraphQLURL)
+}
+
+func fetchDailyLeetCodeFromURL(url string) (*LeetCodeQuestion, error) {
 	query := `{
 		activeDailyCodingChallengeQuestion {
 			question {
@@ -142,7 +150,7 @@ func fetchDailyLeetCode() (*LeetCodeQuestion, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", "https://leetcode.com/graphql", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +162,10 @@ func fetchDailyLeetCode() (*LeetCodeQuestion, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	var gqlResp graphQLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {

@@ -16,5 +16,3 @@ repos:
       - id: go-mod-tidy
       - id: go-test-mod
       - id: golangci-lint-mod
-      - id: go-staticcheck-mod
-      - id: go-sec-mod

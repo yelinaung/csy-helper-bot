@@ -21,7 +21,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 			t.Errorf("expected Content-Type application/json, got %s", r.Header.Get("Content-Type"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(mockResponse)
+		_ = json.NewEncoder(w).Encode(mockResponse)
 	}))
 	defer server.Close()
 
@@ -55,7 +55,7 @@ func TestFetchDailyLeetCode_ServerError(t *testing.T) {
 
 func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("invalid json"))
+		_, _ = w.Write([]byte("invalid json"))
 	}))
 	defer server.Close()
 
@@ -67,9 +67,9 @@ func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
 
 func TestFormatLeetCodeMessage(t *testing.T) {
 	tests := []struct {
-		name       string
-		question   LeetCodeQuestion
-		wantEmoji  string
+		name      string
+		question  LeetCodeQuestion
+		wantEmoji string
 	}{
 		{
 			name:      "Easy question",

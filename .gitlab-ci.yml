@@ -86,4 +86,3 @@ build_image:
       --destination "${CI_REGISTRY_IMAGE}:latest"
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
-

@@ -49,14 +49,14 @@ func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   "Unknown command. Use /help to see available commands.",
 	})
 }
 
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   "Welcome! I'm your helper bot. Use /help to see what I can do.",
 	})
@@ -68,7 +68,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge`
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   helpText,
 	})
@@ -77,14 +77,14 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	question, err := fetchDailyLeetCode()
 	if err != nil {
-		b.SendMessage(ctx, &bot.SendMessageParams{
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: update.Message.Chat.ID,
 			Text:   fmt.Sprintf("Failed to fetch LeetCode daily question: %v", err),
 		})
 		return
 	}
 
-	b.SendMessage(ctx, &bot.SendMessageParams{
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   formatLeetCodeMessage(question),
 	})
@@ -161,7 +161,7 @@ func fetchDailyLeetCodeFromURL(url string) (*LeetCodeQuestion, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)

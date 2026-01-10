@@ -27,9 +27,7 @@ func main() {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
 
-	opts := []bot.Option{
-		bot.WithDefaultHandler(defaultHandler),
-	}
+	opts := []bot.Option{}
 
 	b, err := bot.New(token, opts...)
 	if err != nil {
@@ -45,20 +43,11 @@ func main() {
 	b.Start(ctx)
 }
 
-func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil {
-		return
-	}
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "Unknown command. Use /help to see available commands.",
-	})
-}
-
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "Welcome! I'm your helper bot. Use /help to see what I can do.",
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            "Welcome! I'm your helper bot. Use /help to see what I can do.",
 	})
 }
 
@@ -69,8 +58,9 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /lc - Get today's LeetCode daily challenge`
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   helpText,
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            helpText,
 	})
 }
 
@@ -78,15 +68,17 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	question, err := fetchDailyLeetCode()
 	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   fmt.Sprintf("Failed to fetch LeetCode daily question: %v", err),
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            fmt.Sprintf("Failed to fetch LeetCode daily question: %v", err),
 		})
 		return
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   formatLeetCodeMessage(question),
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            formatLeetCodeMessage(question),
 	})
 }
 

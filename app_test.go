@@ -107,6 +107,52 @@ func TestFormatLeetCodeMessage(t *testing.T) {
 	}
 }
 
+func TestFormatLeetCodeMessage_ContainsURL(t *testing.T) {
+	question := LeetCodeQuestion{
+		Title:      "Two Sum",
+		TitleSlug:  "two-sum",
+		Difficulty: "Easy",
+	}
+
+	msg := formatLeetCodeMessage(&question)
+
+	expectedURL := "https://leetcode.com/problems/two-sum/"
+	if !contains(msg, expectedURL) {
+		t.Errorf("message should contain URL '%s', got '%s'", expectedURL, msg)
+	}
+}
+
+func TestFormatLeetCodeMessage_ContainsDate(t *testing.T) {
+	question := LeetCodeQuestion{
+		Title:      "Two Sum",
+		TitleSlug:  "two-sum",
+		Difficulty: "Easy",
+	}
+
+	msg := formatLeetCodeMessage(&question)
+
+	if !contains(msg, "Date:") {
+		t.Error("message should contain 'Date:'")
+	}
+}
+
+func TestFormatLeetCodeMessage_UnknownDifficulty(t *testing.T) {
+	question := LeetCodeQuestion{
+		Title:      "Unknown",
+		TitleSlug:  "unknown",
+		Difficulty: "Unknown",
+	}
+
+	msg := formatLeetCodeMessage(&question)
+
+	if msg == "" {
+		t.Error("should still generate message for unknown difficulty")
+	}
+	if !contains(msg, "Unknown") {
+		t.Error("message should contain difficulty text even if no emoji")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && searchString(s, substr)))

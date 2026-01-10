@@ -1,7 +1,6 @@
 stages:
 - static-test
 - validate
-- lint
 - test
 - deploy
 
@@ -44,12 +43,12 @@ check_secrets:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 lint:
-  stage: lint
+  stage: validate
   image: golangci/golangci-lint:v2.8-alpine
   tags:
     - playground-bravo
   needs:
-    - job: check_secrets
+    - job: secret_detection
   script:
     - golangci-lint run --timeout=5m ./...
   rules:
@@ -62,6 +61,7 @@ test:
   tags:
     - playground-bravo
   needs:
+    - job: check_secrets
     - job: lint
   script:
     - go test -v ./...

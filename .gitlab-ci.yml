@@ -15,6 +15,7 @@ secret_detection:
   stage: static-test
   tags:
   - playground-bravo
+
 check_secrets:
   stage: validate
   image: apteno/alpine-jq:latest
@@ -48,9 +49,8 @@ lint:
   - job: secret_detection
   script:
   - golangci-lint run --timeout=5m ./...
-  rules:
-  - if: $CI_COMMIT_BRANCH == "master"
-  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+
 test:
   stage: test
   image: golang:1.25-alpine
@@ -61,9 +61,7 @@ test:
   - job: lint
   script:
   - go test -v ./...
-  rules:
-  - if: $CI_COMMIT_BRANCH == "master"
-  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
 deploy:
   stage: deploy
   image: alpine:latest
@@ -83,5 +81,6 @@ deploy:
   - git push dokku HEAD:main --force
   rules:
   - if: $CI_COMMIT_BRANCH == "master"
+
 sast:
   stage: test

@@ -153,6 +153,84 @@ func TestFormatLeetCodeMessage_UnknownDifficulty(t *testing.T) {
 	}
 }
 
+func TestFormatStockMessage_PositiveChange(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  150.25,
+		Change:        2.50,
+		PercentChange: 1.69,
+		High:          151.00,
+		Low:           148.50,
+		Open:          149.00,
+		PreviousClose: 147.75,
+	}
+
+	msg := formatStockMessage("AAPL", quote)
+
+	if !contains(msg, "AAPL") {
+		t.Error("message should contain symbol")
+	}
+	if !contains(msg, "🟢") {
+		t.Error("message should contain green emoji for positive change")
+	}
+	if !contains(msg, "150.25") {
+		t.Error("message should contain current price")
+	}
+}
+
+func TestFormatStockMessage_NegativeChange(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  145.00,
+		Change:        -3.50,
+		PercentChange: -2.36,
+		High:          149.00,
+		Low:           144.50,
+		Open:          148.00,
+		PreviousClose: 148.50,
+	}
+
+	msg := formatStockMessage("MSFT", quote)
+
+	if !contains(msg, "🔴") {
+		t.Error("message should contain red emoji for negative change")
+	}
+	if !contains(msg, "-3.50") {
+		t.Error("message should contain negative change value")
+	}
+}
+
+func TestFormatStockMessage_ContainsAllFields(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  100.00,
+		Change:        0.00,
+		PercentChange: 0.00,
+		High:          101.00,
+		Low:           99.00,
+		Open:          100.50,
+		PreviousClose: 100.00,
+	}
+
+	msg := formatStockMessage("TEST", quote)
+
+	if !contains(msg, "Current:") {
+		t.Error("message should contain Current label")
+	}
+	if !contains(msg, "Change:") {
+		t.Error("message should contain Change label")
+	}
+	if !contains(msg, "Open:") {
+		t.Error("message should contain Open label")
+	}
+	if !contains(msg, "High:") {
+		t.Error("message should contain High label")
+	}
+	if !contains(msg, "Low:") {
+		t.Error("message should contain Low label")
+	}
+	if !contains(msg, "Previous Close:") {
+		t.Error("message should contain Previous Close label")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && searchString(s, substr)))

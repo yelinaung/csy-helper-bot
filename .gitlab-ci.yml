@@ -84,3 +84,8 @@ deploy:
 
 sast:
   stage: test
+  tags:
+  - playground-bravo
+  needs:
+  - job: check_secrets
+  - job: lint

@@ -41,8 +41,27 @@ func main() {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler)
 
+	go startHealthServer()
+
 	log.Println("Bot started...")
 	b.Start(ctx)
+}
+
+func startHealthServer() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5000"
+	}
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+
+	log.Printf("Health server listening on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Printf("Health server error: %v", err)
+	}
 }
 
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {

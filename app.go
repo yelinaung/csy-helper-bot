@@ -53,13 +53,23 @@ func startHealthServer() {
 		port = "5000"
 	}
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
 
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+
 	log.Printf("Health server listening on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Printf("Health server error: %v", err)
 	}
 }

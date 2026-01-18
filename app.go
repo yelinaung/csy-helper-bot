@@ -137,10 +137,12 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
+	profile, _ := fetchCompanyProfile(symbol)
+
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            formatStockMessage(symbol, quote),
+		Text:            formatStockMessage(symbol, quote, profile),
 	})
 }
 
@@ -152,6 +154,13 @@ type StockQuote struct {
 	Low           float64 `json:"l"`
 	Open          float64 `json:"o"`
 	PreviousClose float64 `json:"pc"`
+}
+
+type CompanyProfile struct {
+	Name                 string  `json:"name"`
+	MarketCapitalization float64 `json:"marketCapitalization"`
+	Industry             string  `json:"finnhubIndustry"`
+	Exchange             string  `json:"exchange"`
 }
 
 func fetchStockQuote(symbol string) (*StockQuote, error) {
@@ -185,22 +194,64 @@ func fetchStockQuote(symbol string) (*StockQuote, error) {
 	return &quote, nil
 }
 
-func formatStockMessage(symbol string, quote *StockQuote) string {
+func fetchCompanyProfile(symbol string) (*CompanyProfile, error) {
+	apiKey := os.Getenv("FINNHUB_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("FINNHUB_API_KEY not configured")
+	}
+
+	url := fmt.Sprintf("https://finnhub.io/api/v1/stock/profile2?symbol=%s&token=%s", symbol, apiKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var profile CompanyProfile
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return nil, err
+	}
+
+	return &profile, nil
+}
+
+func formatStockMessage(symbol string, quote *StockQuote, profile *CompanyProfile) string {
 	changeEmoji := "🔴"
 	if quote.Change >= 0 {
 		changeEmoji = "🟢"
 	}
 
-	return fmt.Sprintf(`%s %s
+	name := symbol
+	var marketCapStr string
+	var industryStr string
+
+	if profile != nil && profile.Name != "" {
+		name = profile.Name
+		if profile.MarketCapitalization > 0 {
+			marketCapStr = fmt.Sprintf("\n🏢 Market Cap: $%.2fB", profile.MarketCapitalization/1000)
+		}
+		if profile.Industry != "" {
+			industryStr = fmt.Sprintf("\n🏭 Industry: %s", profile.Industry)
+		}
+	}
+
+	return fmt.Sprintf(`%s (%s) %s
 💵 Current: $%.2f
 📈 Change: %.2f (%.2f%%)
 📊 Open: $%.2f | High: $%.2f | Low: $%.2f
-📉 Previous Close: $%.2f`,
-		symbol, changeEmoji,
+📉 Previous Close: $%.2f%s%s`,
+		name, symbol, changeEmoji,
 		quote.CurrentPrice,
 		quote.Change, quote.PercentChange,
 		quote.Open, quote.High, quote.Low,
-		quote.PreviousClose)
+		quote.PreviousClose,
+		marketCapStr, industryStr)
 }
 
 func formatLeetCodeMessage(question *LeetCodeQuestion) string {

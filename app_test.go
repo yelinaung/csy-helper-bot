@@ -163,17 +163,31 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 		Open:          149.00,
 		PreviousClose: 147.75,
 	}
+	profile := &CompanyProfile{
+		Name:                 "Apple Inc",
+		MarketCapitalization: 3000000,
+		Industry:             "Technology",
+	}
 
-	msg := formatStockMessage("AAPL", quote)
+	msg := formatStockMessage("AAPL", quote, profile)
 
 	if !contains(msg, "AAPL") {
 		t.Error("message should contain symbol")
+	}
+	if !contains(msg, "Apple Inc") {
+		t.Error("message should contain company name")
 	}
 	if !contains(msg, "🟢") {
 		t.Error("message should contain green emoji for positive change")
 	}
 	if !contains(msg, "150.25") {
 		t.Error("message should contain current price")
+	}
+	if !contains(msg, "Market Cap") {
+		t.Error("message should contain market cap")
+	}
+	if !contains(msg, "Technology") {
+		t.Error("message should contain industry")
 	}
 }
 
@@ -188,7 +202,7 @@ func TestFormatStockMessage_NegativeChange(t *testing.T) {
 		PreviousClose: 148.50,
 	}
 
-	msg := formatStockMessage("MSFT", quote)
+	msg := formatStockMessage("MSFT", quote, nil)
 
 	if !contains(msg, "🔴") {
 		t.Error("message should contain red emoji for negative change")
@@ -209,7 +223,7 @@ func TestFormatStockMessage_ContainsAllFields(t *testing.T) {
 		PreviousClose: 100.00,
 	}
 
-	msg := formatStockMessage("TEST", quote)
+	msg := formatStockMessage("TEST", quote, nil)
 
 	if !contains(msg, "Current:") {
 		t.Error("message should contain Current label")

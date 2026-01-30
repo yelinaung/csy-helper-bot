@@ -1,7 +1,6 @@
 stages:
-- static-test
+- scan
 - validate
-- test
 - deploy
 
 variables:
@@ -12,7 +11,7 @@ include:
 - template: Security/SAST.gitlab-ci.yml
 
 secret_detection:
-  stage: static-test
+  stage: scan
   tags:
   - playground-bravo
 
@@ -45,20 +44,29 @@ lint:
   image: golangci/golangci-lint:v2.8-alpine
   tags:
   - playground-bravo
-  needs:
-  - job: secret_detection
+  cache:
+    key: go-lint-cache
+    paths:
+    - .cache/golangci-lint
   script:
   - golangci-lint run --timeout=5m ./...
 
 
 test:
-  stage: test
-  image: golang:1.26-alpine
+  stage: validate
+  image: golang:1.25-alpine
   tags:
   - playground-bravo
   needs:
   - job: check_secrets
-  - job: lint
+  cache:
+    key: go-mod-cache
+    paths:
+    - .cache/go-build
+    - .cache/go-mod
+  before_script:
+  - export GOCACHE="$(pwd)/.cache/go-build"
+  - export GOMODCACHE="$(pwd)/.cache/go-mod"
   script:
   - go test -v ./...
 
@@ -70,6 +78,7 @@ deploy:
   needs:
   - job: test
   - job: check_sast
+  - job: lint
   before_script:
   - apk add --no-cache git openssh-client
   - eval $(ssh-agent -s)
@@ -84,20 +93,18 @@ deploy:
   - if: $CI_COMMIT_BRANCH == "master"
 
 semgrep-sast:
-  stage: static-test
+  stage: scan
   tags:
   - playground-bravo
 
 check_sast:
-  stage: test
+  stage: validate
   image: apteno/alpine-jq:latest
   tags:
   - playground-bravo
   needs:
   - job: semgrep-sast
     artifacts: true
-  - job: check_secrets
-  - job: lint
   script:
   - |
     if [ ! -f "gl-sast-report.json" ]; then

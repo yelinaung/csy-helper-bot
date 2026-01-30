@@ -1,5 +1,6 @@
 stages:
 - security
+- test
 - validate
 - deploy
 

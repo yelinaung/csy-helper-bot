@@ -28,7 +28,12 @@ func main() {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
 
-	opts := []bot.Option{}
+	opts := []bot.Option{
+		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
+			// Silent handler - do nothing for unmatched updates
+			// This suppresses the default "[TGBOT] [UPDATE]" verbose logging
+		}),
+	}
 
 	b, err := bot.New(token, opts...)
 	if err != nil {

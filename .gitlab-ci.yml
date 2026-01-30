@@ -1,5 +1,5 @@
 stages:
-- scan
+- security
 - validate
 - deploy
 
@@ -11,7 +11,7 @@ include:
 - template: Security/SAST.gitlab-ci.yml
 
 secret_detection:
-  stage: scan
+  stage: security
   tags:
   - playground-bravo
 
@@ -70,30 +70,8 @@ test:
   script:
   - go test -v ./...
 
-deploy:
-  stage: deploy
-  image: alpine:latest
-  tags:
-  - playground-bravo
-  needs:
-  - job: test
-  - job: check_sast
-  - job: lint
-  before_script:
-  - apk add --no-cache git openssh-client
-  - eval $(ssh-agent -s)
-  - echo "$DOKKU_SSH_PRIVATE_KEY_B64" | base64 -d | tr -d '\r' | ssh-add -
-  - mkdir -p ~/.ssh
-  - chmod 700 ~/.ssh
-  - echo "$DOKKU_HOST_KEY" >> ~/.ssh/known_hosts
-  script:
-  - git remote add dokku dokku@$DOKKU_HOST:csy-helper-bot || true
-  - git push dokku HEAD:main --force
-  rules:
-  - if: $CI_COMMIT_BRANCH == "master"
-
 semgrep-sast:
-  stage: scan
+  stage: security
   tags:
   - playground-bravo
 
@@ -124,3 +102,25 @@ check_sast:
   rules:
   - if: $CI_COMMIT_BRANCH == "master"
   - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+deploy:
+  stage: deploy
+  image: alpine:latest
+  tags:
+  - playground-bravo
+  needs:
+  - job: test
+  - job: check_sast
+  - job: lint
+  before_script:
+  - apk add --no-cache git openssh-client
+  - eval $(ssh-agent -s)
+  - echo "$DOKKU_SSH_PRIVATE_KEY_B64" | base64 -d | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+  - echo "$DOKKU_HOST_KEY" >> ~/.ssh/known_hosts
+  script:
+  - git remote add dokku dokku@$DOKKU_HOST:csy-helper-bot || true
+  - git push dokku HEAD:main --force
+  rules:
+  - if: $CI_COMMIT_BRANCH == "master"

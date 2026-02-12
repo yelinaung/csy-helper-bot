@@ -1,5 +1,7 @@
 # CSY Helper Bot
 
+[![CI/CD Pipeline](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml)
+
 A Telegram bot that provides helpful utilities for developers.
 
 ## Features

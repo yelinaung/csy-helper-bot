@@ -1,10 +1,11 @@
+---
 name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master, main]
+    branches: [master]
   pull_request:
-    branches: [master, main]
+    branches: [master]
 
 env:
   GO_VERSION: '1.25'
@@ -16,7 +17,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     steps:
       - name: Checkout code
-      - uses: actions/checkout@v6
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -33,7 +34,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-      - uses: actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Run Semgrep
         uses: returntocorp/semgrep-action@v1
@@ -61,7 +62,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     steps:
       - name: Checkout code
-      - uses: actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -84,7 +85,7 @@ jobs:
     if: always() && needs.check-secrets.result == 'success'
     steps:
       - name: Checkout code
-      - uses: actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -100,7 +101,7 @@ jobs:
     name: Validate SAST
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     needs: semgrep-sast
-    if: always() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+    if: always() && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
     steps:
       - name: Check SAST results
         run: |

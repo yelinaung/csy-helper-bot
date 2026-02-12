@@ -50,7 +50,6 @@ jobs:
     name: Validate Secrets
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     needs: secret-detection
-    if: always()
     steps:
       - name: Check secret detection results
         run: |
@@ -83,7 +82,6 @@ jobs:
     name: Validate SAST
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     needs: semgrep-sast
-    if: always() && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
     steps:
       - name: Check SAST results
         run: |
@@ -98,7 +96,7 @@ jobs:
       - check-secrets
       - check-sast
       - lint
-    if: always() && needs.check-secrets.result == 'success'
+    if: needs.check-secrets.result == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

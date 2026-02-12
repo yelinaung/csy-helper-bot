@@ -25,6 +25,7 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
 
   # SAST Scanning
   semgrep-sast:
@@ -77,11 +78,26 @@ jobs:
         env:
           GOTOOLCHAIN: auto
 
+  # Check SAST
+  check-sast:
+    name: Validate SAST
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    needs: semgrep-sast
+    if: always() && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    steps:
+      - name: Check SAST results
+        run: |
+          echo "SAST scanning completed"
+          # Semgrep will fail the job if vulnerabilities are found
+
   # Test
   test:
     name: Test
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
-    needs: check-secrets
+    needs:
+      - check-secrets
+      - check-sast
+      - lint
     if: always() && needs.check-secrets.result == 'success'
     steps:
       - name: Checkout code
@@ -95,15 +111,3 @@ jobs:
 
       - name: Run tests
         run: go test -v ./...
-
-  # Check SAST
-  check-sast:
-    name: Validate SAST
-    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
-    needs: semgrep-sast
-    if: always() && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
-    steps:
-      - name: Check SAST results
-        run: |
-          echo "SAST scanning completed"
-          # Semgrep will fail the job if vulnerabilities are found

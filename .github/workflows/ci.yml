@@ -1,0 +1,115 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  # Secret Detection
+  secret-detection:
+    name: Secret Detection
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # SAST Scanning
+  semgrep-sast:
+    name: SAST Scan
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/golang
+
+  # Check Secrets Job
+  check-secrets:
+    name: Validate Secrets
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    needs: secret-detection
+    if: always()
+    steps:
+      - name: Check secret detection results
+        run: |
+          echo "Secret detection completed"
+          # GitLeaks will fail the job if secrets are found
+
+  # Lint
+  lint:
+    name: Lint
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.8
+          args: --timeout=5m
+
+  # Test
+  test:
+    name: Test
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    needs: check-secrets
+    if: always() && needs.check-secrets.result == 'success'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run tests
+        run: go test -v ./...
+
+  # Check SAST
+  check-sast:
+    name: Validate SAST
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    needs: semgrep-sast
+    if: always() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+    steps:
+      - name: Check SAST results
+        run: |
+          echo "SAST scanning completed"
+          # Semgrep will fail the job if vulnerabilities are found

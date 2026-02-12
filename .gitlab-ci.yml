@@ -55,7 +55,7 @@ lint:
 
 test:
   stage: validate
-  image: golang:1.25-alpine
+  image: golang:1.26-alpine
   tags:
   - playground-bravo
   needs:

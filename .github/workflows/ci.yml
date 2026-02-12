@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -33,7 +33,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run Semgrep
         uses: returntocorp/semgrep-action@v1
@@ -61,18 +61,20 @@ jobs:
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.8
-          args: --timeout=5m
+        env:
+          GOTOOLCHAIN: auto
 
   # Test
   test:
@@ -82,22 +84,13 @@ jobs:
     if: always() && needs.check-secrets.result == 'success'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       - name: Run tests
         run: go test -v ./...

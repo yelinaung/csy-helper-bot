@@ -42,7 +42,7 @@ check_secrets:
 
 lint:
   stage: validate
-  image: golangci/golangci-lint:v2.8-alpine
+  image: golangci/golangci-lint:v2.9-alpine
   tags:
   - playground-bravo
   cache:

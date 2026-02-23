@@ -7,14 +7,26 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
+)
+
+var (
+	httpClient  = &http.Client{Timeout: 10 * time.Second}
+	symbolRegex = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
+)
+
+const (
+	finnhubBaseURL     = "https://finnhub.io/api/v1"
+	leetCodeGraphQLURL = "https://leetcode.com/graphql"
 )
 
 func main() {
@@ -44,6 +56,7 @@ func main() {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, helpHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "/lc", bot.MatchTypeExact, lcHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler)
 
 	go startHealthServer()
@@ -74,8 +87,8 @@ func startHealthServer() {
 	}
 
 	log.Printf("Health server listening on port %s", port)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Printf("Health server error: %v", err)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Health server error: %v", err)
 	}
 }
 
@@ -102,7 +115,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 }
 
 func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	question, err := fetchDailyLeetCode()
+	question, err := fetchDailyLeetCode(ctx)
 	if err != nil {
 		log.Printf("Failed to fetch LeetCode daily question: %v", err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -133,7 +146,16 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	quote, err := fetchStockQuote(symbol)
+	if !symbolRegex.MatchString(symbol) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Invalid stock symbol. Use 1-10 alphanumeric characters (e.g., AAPL, BRK.A).",
+		})
+		return
+	}
+
+	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
 		log.Printf("Failed to fetch stock quote for %s: %v", symbol, err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -144,7 +166,10 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	profile, _ := fetchCompanyProfile(symbol)
+	profile, err := fetchCompanyProfile(ctx, symbol)
+	if err != nil {
+		log.Printf("Failed to fetch company profile for %s: %v", symbol, err)
+	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -170,16 +195,30 @@ type CompanyProfile struct {
 	Exchange             string  `json:"exchange"`
 }
 
-func fetchStockQuote(symbol string) (*StockQuote, error) {
+func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("FINNHUB_API_KEY not configured")
 	}
+	return fetchStockQuoteFromURL(ctx, finnhubBaseURL, symbol, apiKey)
+}
 
-	url := fmt.Sprintf("https://finnhub.io/api/v1/quote?symbol=%s&token=%s", symbol, apiKey)
+func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string) (*StockQuote, error) {
+	u, err := url.Parse(baseURL + "/quote")
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("symbol", symbol)
+	q.Set("token", apiKey)
+	u.RawQuery = q.Encode()
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -201,16 +240,30 @@ func fetchStockQuote(symbol string) (*StockQuote, error) {
 	return &quote, nil
 }
 
-func fetchCompanyProfile(symbol string) (*CompanyProfile, error) {
+func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, error) {
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("FINNHUB_API_KEY not configured")
 	}
+	return fetchCompanyProfileFromURL(ctx, finnhubBaseURL, symbol, apiKey)
+}
 
-	url := fmt.Sprintf("https://finnhub.io/api/v1/stock/profile2?symbol=%s&token=%s", symbol, apiKey)
+func fetchCompanyProfileFromURL(ctx context.Context, baseURL, symbol, apiKey string) (*CompanyProfile, error) {
+	u, err := url.Parse(baseURL + "/stock/profile2")
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("symbol", symbol)
+	q.Set("token", apiKey)
+	u.RawQuery = q.Encode()
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +322,7 @@ func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	}
 
 	emoji := difficultyEmoji[question.Difficulty]
-	date := time.Now().Format("2006-01-02")
+	date := time.Now().UTC().Format("2006-01-02")
 	url := fmt.Sprintf("https://leetcode.com/problems/%s/", question.TitleSlug)
 
 	return fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",
@@ -287,6 +340,9 @@ type graphQLRequest struct {
 }
 
 type graphQLResponse struct {
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 	Data struct {
 		ActiveDailyCodingChallengeQuestion struct {
 			Question struct {
@@ -298,13 +354,11 @@ type graphQLResponse struct {
 	} `json:"data"`
 }
 
-const leetCodeGraphQLURL = "https://leetcode.com/graphql"
-
-func fetchDailyLeetCode() (*LeetCodeQuestion, error) {
-	return fetchDailyLeetCodeFromURL(leetCodeGraphQLURL)
+func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
+	return fetchDailyLeetCodeFromURL(ctx, leetCodeGraphQLURL)
 }
 
-func fetchDailyLeetCodeFromURL(url string) (*LeetCodeQuestion, error) {
+func fetchDailyLeetCodeFromURL(ctx context.Context, apiURL string) (*LeetCodeQuestion, error) {
 	query := `{
 		activeDailyCodingChallengeQuestion {
 			question {
@@ -321,14 +375,13 @@ func fetchDailyLeetCodeFromURL(url string) (*LeetCodeQuestion, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +396,15 @@ func fetchDailyLeetCodeFromURL(url string) (*LeetCodeQuestion, error) {
 		return nil, err
 	}
 
+	if len(gqlResp.Errors) > 0 {
+		return nil, fmt.Errorf("graphql error: %s", gqlResp.Errors[0].Message)
+	}
+
 	q := gqlResp.Data.ActiveDailyCodingChallengeQuestion.Question
+	if q.Title == "" || q.TitleSlug == "" || q.Difficulty == "" {
+		return nil, fmt.Errorf("daily question data missing")
+	}
+
 	return &LeetCodeQuestion{
 		Title:      q.Title,
 		TitleSlug:  q.TitleSlug,

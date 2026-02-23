@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -25,7 +27,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	question, err := fetchDailyLeetCodeFromURL(server.URL)
+	question, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -47,7 +49,7 @@ func TestFetchDailyLeetCode_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(server.URL)
+	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for server error response")
 	}
@@ -59,9 +61,35 @@ func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(server.URL)
+	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for invalid JSON response")
+	}
+}
+
+func TestFetchDailyLeetCode_GraphQLError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errors":[{"message":"rate limited"}]}`))
+	}))
+	defer server.Close()
+
+	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	if err == nil {
+		t.Error("expected error for graphql errors response")
+	}
+}
+
+func TestFetchDailyLeetCode_EmptyQuestionData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"activeDailyCodingChallengeQuestion":{"question":{"title":"","titleSlug":"","difficulty":""}}}}`))
+	}))
+	defer server.Close()
+
+	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	if err == nil {
+		t.Error("expected error for empty question data")
 	}
 }
 
@@ -94,13 +122,13 @@ func TestFormatLeetCodeMessage(t *testing.T) {
 			if msg == "" {
 				t.Error("expected non-empty message")
 			}
-			if !contains(msg, tt.question.Title) {
+			if !strings.Contains(msg, tt.question.Title) {
 				t.Errorf("message should contain title '%s'", tt.question.Title)
 			}
-			if !contains(msg, tt.wantEmoji) {
+			if !strings.Contains(msg, tt.wantEmoji) {
 				t.Errorf("message should contain emoji '%s'", tt.wantEmoji)
 			}
-			if !contains(msg, tt.question.TitleSlug) {
+			if !strings.Contains(msg, tt.question.TitleSlug) {
 				t.Errorf("message should contain URL with slug '%s'", tt.question.TitleSlug)
 			}
 		})
@@ -117,7 +145,7 @@ func TestFormatLeetCodeMessage_ContainsURL(t *testing.T) {
 	msg := formatLeetCodeMessage(&question)
 
 	expectedURL := "https://leetcode.com/problems/two-sum/"
-	if !contains(msg, expectedURL) {
+	if !strings.Contains(msg, expectedURL) {
 		t.Errorf("message should contain URL '%s', got '%s'", expectedURL, msg)
 	}
 }
@@ -131,7 +159,7 @@ func TestFormatLeetCodeMessage_ContainsDate(t *testing.T) {
 
 	msg := formatLeetCodeMessage(&question)
 
-	if !contains(msg, "Date:") {
+	if !strings.Contains(msg, "Date:") {
 		t.Error("message should contain 'Date:'")
 	}
 }
@@ -148,7 +176,7 @@ func TestFormatLeetCodeMessage_UnknownDifficulty(t *testing.T) {
 	if msg == "" {
 		t.Error("should still generate message for unknown difficulty")
 	}
-	if !contains(msg, "Unknown") {
+	if !strings.Contains(msg, "Unknown") {
 		t.Error("message should contain difficulty text even if no emoji")
 	}
 }
@@ -171,22 +199,22 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 
 	msg := formatStockMessage("AAPL", quote, profile)
 
-	if !contains(msg, "AAPL") {
+	if !strings.Contains(msg, "AAPL") {
 		t.Error("message should contain symbol")
 	}
-	if !contains(msg, "Apple Inc") {
+	if !strings.Contains(msg, "Apple Inc") {
 		t.Error("message should contain company name")
 	}
-	if !contains(msg, "🟢") {
+	if !strings.Contains(msg, "🟢") {
 		t.Error("message should contain green emoji for positive change")
 	}
-	if !contains(msg, "150.25") {
+	if !strings.Contains(msg, "150.25") {
 		t.Error("message should contain current price")
 	}
-	if !contains(msg, "Market Cap") {
+	if !strings.Contains(msg, "Market Cap") {
 		t.Error("message should contain market cap")
 	}
-	if !contains(msg, "Technology") {
+	if !strings.Contains(msg, "Technology") {
 		t.Error("message should contain industry")
 	}
 }
@@ -204,10 +232,10 @@ func TestFormatStockMessage_NegativeChange(t *testing.T) {
 
 	msg := formatStockMessage("MSFT", quote, nil)
 
-	if !contains(msg, "🔴") {
+	if !strings.Contains(msg, "🔴") {
 		t.Error("message should contain red emoji for negative change")
 	}
-	if !contains(msg, "-3.50") {
+	if !strings.Contains(msg, "-3.50") {
 		t.Error("message should contain negative change value")
 	}
 }
@@ -225,36 +253,142 @@ func TestFormatStockMessage_ContainsAllFields(t *testing.T) {
 
 	msg := formatStockMessage("TEST", quote, nil)
 
-	if !contains(msg, "Current:") {
+	if !strings.Contains(msg, "Current:") {
 		t.Error("message should contain Current label")
 	}
-	if !contains(msg, "Change:") {
+	if !strings.Contains(msg, "Change:") {
 		t.Error("message should contain Change label")
 	}
-	if !contains(msg, "Open:") {
+	if !strings.Contains(msg, "Open:") {
 		t.Error("message should contain Open label")
 	}
-	if !contains(msg, "High:") {
+	if !strings.Contains(msg, "High:") {
 		t.Error("message should contain High label")
 	}
-	if !contains(msg, "Low:") {
+	if !strings.Contains(msg, "Low:") {
 		t.Error("message should contain Low label")
 	}
-	if !contains(msg, "Previous Close:") {
+	if !strings.Contains(msg, "Previous Close:") {
 		t.Error("message should contain Previous Close label")
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && searchString(s, substr)))
+func TestFetchStockQuote(t *testing.T) {
+	mockQuote := StockQuote{
+		CurrentPrice:  150.25,
+		Change:        2.50,
+		PercentChange: 1.69,
+		High:          151.00,
+		Low:           148.50,
+		Open:          149.00,
+		PreviousClose: 147.75,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("symbol") != "AAPL" {
+			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
+		}
+		if r.URL.Query().Get("token") != "test-key" {
+			t.Errorf("expected token=test-key, got %s", r.URL.Query().Get("token"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockQuote)
+	}))
+	defer server.Close()
+
+	result, err := fetchStockQuoteFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.CurrentPrice != 150.25 {
+		t.Errorf("expected price 150.25, got %f", result.CurrentPrice)
+	}
+	if result.Change != 2.50 {
+		t.Errorf("expected change 2.50, got %f", result.Change)
+	}
 }
 
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestFetchStockQuote_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	_, err := fetchStockQuoteFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	if err == nil {
+		t.Error("expected error for server error response")
 	}
-	return false
+}
+
+func TestFetchStockQuote_SymbolNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(StockQuote{})
+	}))
+	defer server.Close()
+
+	_, err := fetchStockQuoteFromURL(context.Background(), server.URL, "INVALID", "test-key")
+	if err == nil {
+		t.Error("expected error for symbol not found")
+	}
+}
+
+func TestFetchCompanyProfile(t *testing.T) {
+	mockProfile := CompanyProfile{
+		Name:                 "Apple Inc",
+		MarketCapitalization: 3000000,
+		Industry:             "Technology",
+		Exchange:             "NASDAQ",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("symbol") != "AAPL" {
+			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockProfile)
+	}))
+	defer server.Close()
+
+	result, err := fetchCompanyProfileFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Name != "Apple Inc" {
+		t.Errorf("expected name 'Apple Inc', got '%s'", result.Name)
+	}
+	if result.Industry != "Technology" {
+		t.Errorf("expected industry 'Technology', got '%s'", result.Industry)
+	}
+}
+
+func TestSymbolValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		symbol  string
+		isValid bool
+	}{
+		{"valid simple", "AAPL", true},
+		{"valid with dot", "BRK.A", true},
+		{"valid with hyphen", "BF-B", true},
+		{"valid single char", "T", true},
+		{"valid with number", "X1", true},
+		{"empty", "", false},
+		{"too long", "ABCDEFGHIJK", false},
+		{"has space", "AA PL", false},
+		{"has ampersand", "AAPL&X=1", false},
+		{"has slash", "AAPL/X", false},
+		{"lowercase", "aapl", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := symbolRegex.MatchString(tt.symbol)
+			if got != tt.isValid {
+				t.Errorf("symbolRegex.MatchString(%q) = %v, want %v", tt.symbol, got, tt.isValid)
+			}
+		})
+	}
 }

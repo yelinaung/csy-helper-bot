@@ -8,7 +8,7 @@ on:
     branches: [master]
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26'
 
 jobs:
   # Secret Detection
@@ -45,17 +45,6 @@ jobs:
             p/secrets
             p/golang
 
-  # Check Secrets Job
-  check-secrets:
-    name: Validate Secrets
-    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
-    needs: secret-detection
-    steps:
-      - name: Check secret detection results
-        run: |
-          echo "Secret detection completed"
-          # GitLeaks will fail the job if secrets are found
-
   # Lint
   lint:
     name: Lint
@@ -77,26 +66,14 @@ jobs:
         env:
           GOTOOLCHAIN: auto
 
-  # Check SAST
-  check-sast:
-    name: Validate SAST
-    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
-    needs: semgrep-sast
-    steps:
-      - name: Check SAST results
-        run: |
-          echo "SAST scanning completed"
-          # Semgrep will fail the job if vulnerabilities are found
-
   # Test
   test:
     name: Test
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     needs:
-      - check-secrets
-      - check-sast
+      - secret-detection
+      - semgrep-sast
       - lint
-    if: needs.check-secrets.result == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

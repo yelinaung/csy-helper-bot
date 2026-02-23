@@ -8,8 +8,8 @@ run = [
 [tasks.push-all]
 description = "Pull with rebase from github, then push current branch to all remotes"
 run = [
-  "branch=$(git branch --show-current); test -n \"$branch\"",
-  "git pull --rebase --autostash github \"$branch\"",
-  "git push github \"$branch\"",
-  "git push gitlab \"$branch\"",
+  "test -n \"$(git branch --show-current)\"",
+  "git pull --rebase --autostash github \"$(git branch --show-current)\"",
+  "git push github \"$(git branch --show-current)\"",
+  "git push gitlab \"$(git branch --show-current)\"",
 ]

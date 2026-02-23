@@ -104,10 +104,11 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	question, err := fetchDailyLeetCode()
 	if err != nil {
+		log.Printf("Failed to fetch LeetCode daily question: %v", err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf("Failed to fetch LeetCode daily question: %v", err),
+			Text:            "Failed to fetch LeetCode daily question. Please try again later.",
 		})
 		return
 	}
@@ -134,10 +135,11 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	quote, err := fetchStockQuote(symbol)
 	if err != nil {
+		log.Printf("Failed to fetch stock quote for %s: %v", symbol, err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf("Failed to fetch stock quote: %v", err),
+			Text:            fmt.Sprintf("Failed to fetch stock quote for %s. Please try again later.", symbol),
 		})
 		return
 	}

@@ -2,6 +2,10 @@
 
 [![CI/CD Pipeline](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml)
 
+> [!IMPORTANT]
+> **Disclaimer**: This application was developed primarily by AI coding agents (Claude/Amp) as an experimental project. While functional, **quality is not guaranteed**. If you choose to use or deploy this bot, please do so with c
+aution, review the code yourself, and understand that it may contain bugs or security issues. Use at your own risk.
+
 A Telegram bot that provides helpful utilities for developers.
 
 ## Features

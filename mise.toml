@@ -1,0 +1,15 @@
+[tasks.test]
+description = "Run Go tests"
+run = [
+  "mkdir -p .cache/go-build .cache/go-mod",
+  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go test -v ./...",
+]
+
+[tasks.push-all]
+description = "Pull with rebase from github, then push current branch to all remotes"
+run = [
+  "branch=$(git branch --show-current); test -n \"$branch\"",
+  "git pull --rebase --autostash github \"$branch\"",
+  "git push github \"$branch\"",
+  "git push gitlab \"$branch\"",
+]

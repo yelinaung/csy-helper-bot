@@ -124,6 +124,8 @@ Message:
 		return "", errors.New("empty explanation from Gemini")
 	}
 
+	out = out + "\n\n[Tone: " + tone + "]"
+
 	if len(out) > maxExplainResponseLength {
 		out = strings.TrimSpace(out[:maxExplainResponseLength-3]) + "..."
 	}

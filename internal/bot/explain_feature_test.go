@@ -155,4 +155,7 @@ func TestShouldRespondInBurmese(t *testing.T) {
 	if shouldRespondInBurmese("@csy_helper_dev_bot explain me this") != false {
 		t.Fatal("expected non-Burmese request not to be detected")
 	}
+	if shouldRespondInBurmese("@csy_helper_dev_bot explain me this", "ဆရာငှက်အခွေတွေ ထည့်ထားဒယ်") != true {
+		t.Fatal("expected Burmese quote text to trigger Burmese response")
+	}
 }

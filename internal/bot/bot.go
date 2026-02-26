@@ -421,7 +421,7 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		},
 	})
 
-	respondInBurmese := shouldRespondInBurmese(update.Message.Text)
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText)
 	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, respondInBurmese)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to explain quoted message")
@@ -492,11 +492,13 @@ func extractQuotedText(message *models.Message) string {
 	return ""
 }
 
-func shouldRespondInBurmese(requestText string) bool {
-	for _, r := range requestText {
-		// Myanmar script blocks.
-		if (r >= 0x1000 && r <= 0x109F) || (r >= 0xAA60 && r <= 0xAA7F) || (r >= 0xA9E0 && r <= 0xA9FF) {
-			return true
+func shouldRespondInBurmese(texts ...string) bool {
+	for _, text := range texts {
+		for _, r := range text {
+			// Myanmar script blocks.
+			if (r >= 0x1000 && r <= 0x109F) || (r >= 0xAA60 && r <= 0xAA7F) || (r >= 0xA9E0 && r <= 0xA9FF) {
+				return true
+			}
 		}
 	}
 	return false

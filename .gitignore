@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-csy-helper-bot
+/csy-helper-bot
 
 # Test binary
 *.test

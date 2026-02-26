@@ -17,8 +17,11 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(level)
 	zerolog.TimeFieldFormat = time.RFC3339
-	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
-	log.Info().Str("level", zerolog.GlobalLevel().String()).Msg("Logger initialized")
+	log.Logger = zerolog.New(zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: time.RFC3339,
+	}).With().Timestamp().Caller().Logger()
+	log.Info().Msgf("Logger initialized (level=%s)", zerolog.GlobalLevel().String())
 
 	if err := appbot.Run(); err != nil {
 		log.Fatal().Err(err).Msg("Bot stopped")

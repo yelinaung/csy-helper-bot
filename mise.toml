@@ -12,6 +12,10 @@ run = [
   "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod golangci-lint run --config .golangci.yml ./...",
 ]
 
+[tasks.format]
+description = "Format Go code"
+run = ["gofumpt -w ."]
+
 [tasks.push-all]
 description = "Pull with rebase from github, then push current branch to all remotes"
 run = [

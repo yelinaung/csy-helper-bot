@@ -25,6 +25,7 @@ var (
 	httpClient    = &http.Client{Timeout: 10 * time.Second}
 	symbolRegex   = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
 	textExplainer *geminiExplainer
+	botMention    string
 )
 
 const (
@@ -61,7 +62,15 @@ func Run() error {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "explain me this", bot.MatchTypeExact, explainHandler)
+
+	me, err := b.GetMe(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bot profile: %w", err)
+	}
+	if me.Username != "" {
+		botMention = "@" + strings.ToLower(me.Username)
+	}
+	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler)
 
 	var initErr error
 	textExplainer, initErr = initGeminiExplainer()
@@ -125,12 +134,12 @@ func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 }
 
 func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	helpText := `Available commands:
+	helpText := fmt.Sprintf(`Available commands:
 /start - Start the bot
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
-Reply with "explain me this" - Explain the replied message`
+Mention + "explain me this" - Explain the replied message (e.g., @%s explain me this)`, strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -227,7 +236,7 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            `Reply to a text message and send "explain me this".`,
+			Text:            fmt.Sprintf(`Reply to a text message and send "%s explain me this".`, botMention),
 		})
 		return
 	}
@@ -281,6 +290,36 @@ func extractQuotedText(message *models.Message) string {
 	}
 
 	return ""
+}
+
+func shouldHandleExplainMention(update *models.Update) bool {
+	if update == nil || update.Message == nil {
+		return false
+	}
+	if botMention == "" {
+		return false
+	}
+
+	text := strings.ToLower(strings.TrimSpace(update.Message.Text))
+	if text == "" || !strings.Contains(text, "explain me this") {
+		return false
+	}
+
+	for _, entity := range update.Message.Entities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		if entity.Offset < 0 || entity.Length <= 0 || entity.Offset+entity.Length > len(update.Message.Text) {
+			continue
+		}
+
+		mention := strings.ToLower(update.Message.Text[entity.Offset : entity.Offset+entity.Length])
+		if mention == botMention {
+			return true
+		}
+	}
+
+	return false
 }
 
 type StockQuote struct {

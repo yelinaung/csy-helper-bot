@@ -112,3 +112,38 @@ func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 		t.Fatalf("expected truncated suffix ..., got %q", got[len(got)-10:])
 	}
 }
+
+func TestShouldHandleExplainMention(t *testing.T) {
+	prevMention := botMention
+	botMention = "@csy_helper_dev_bot"
+	defer func() { botMention = prevMention }()
+
+	t.Run("matches when mention and phrase are present", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: "@csy_helper_dev_bot explain me this",
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len("@csy_helper_dev_bot"),
+					},
+				},
+			},
+		}
+		if !shouldHandleExplainMention(update) {
+			t.Fatal("expected matcher to pass")
+		}
+	})
+
+	t.Run("does not match without mention", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: "explain me this",
+			},
+		}
+		if shouldHandleExplainMention(update) {
+			t.Fatal("expected matcher to fail")
+		}
+	})
+}

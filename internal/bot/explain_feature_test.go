@@ -147,3 +147,12 @@ func TestShouldHandleExplainMention(t *testing.T) {
 		}
 	})
 }
+
+func TestShouldRespondInBurmese(t *testing.T) {
+	if shouldRespondInBurmese("မင်္ဂလာပါ @csy_helper_dev_bot explain me this") != true {
+		t.Fatal("expected Burmese request to be detected")
+	}
+	if shouldRespondInBurmese("@csy_helper_dev_bot explain me this") != false {
+		t.Fatal("expected non-Burmese request not to be detected")
+	}
+}

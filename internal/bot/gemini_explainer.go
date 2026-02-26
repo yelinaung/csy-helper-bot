@@ -51,6 +51,10 @@ func newGeminiExplainer(ctx context.Context, apiKey string) (*geminiExplainer, e
 }
 
 func (g *geminiExplainer) explain(ctx context.Context, text string) (string, error) {
+	return g.explainWithLanguage(ctx, text, false)
+}
+
+func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, respondInBurmese bool) (string, error) {
 	if g == nil || g.generator == nil {
 		return "", errors.New("gemini client not initialized")
 	}
@@ -60,11 +64,17 @@ func (g *geminiExplainer) explain(ctx context.Context, text string) (string, err
 		return "", errors.New("text is required")
 	}
 
+	languageInstruction := "Respond in English."
+	if respondInBurmese {
+		languageInstruction = "Respond in Burmese."
+	}
+
 	prompt := fmt.Sprintf(`Explain the following message in simple terms.
 Keep it concise and practical. Use plain language.
+%s
 
 Message:
-"%s"`, sanitized)
+"%s"`, languageInstruction, sanitized)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, explainTimeout)
 	defer cancel()
@@ -72,7 +82,7 @@ Message:
 	temp := float32(0.2)
 	config := &genai.GenerateContentConfig{
 		Temperature:     &temp,
-		MaxOutputTokens: 600,
+		MaxOutputTokens: 2048,
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{
 				{Text: "You explain technical and non-technical text clearly and briefly. Avoid fluff."},

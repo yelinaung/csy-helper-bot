@@ -411,7 +411,18 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	explanation, err := textExplainer.explain(ctx, quotedText)
+	thinkingMsg, thinkingErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            "thinking...",
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text)
+	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, respondInBurmese)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to explain quoted message")
 
@@ -420,18 +431,37 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			errText = "Explanation timed out. Please try again."
 		}
 
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            errText,
-		})
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
 		return
+	}
+
+	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+func sendOrEditExplainResult(
+	ctx context.Context,
+	b *bot.Bot,
+	update *models.Update,
+	thinkingMsg *models.Message,
+	thinkingErr error,
+	text string,
+) {
+	if thinkingErr == nil && thinkingMsg != nil {
+		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    update.Message.Chat.ID,
+			MessageID: thinkingMsg.ID,
+			Text:      text,
+		})
+		if editErr == nil {
+			return
+		}
+		log.Warn().Err(editErr).Msg("Failed to edit thinking message; falling back to send message")
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            explanation,
+		Text:            text,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
@@ -460,6 +490,16 @@ func extractQuotedText(message *models.Message) string {
 	}
 
 	return ""
+}
+
+func shouldRespondInBurmese(requestText string) bool {
+	for _, r := range requestText {
+		// Myanmar script blocks.
+		if (r >= 0x1000 && r <= 0x109F) || (r >= 0xAA60 && r <= 0xAA7F) || (r >= 0xA9E0 && r <= 0xA9FF) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldHandleExplainMention(update *models.Update) bool {

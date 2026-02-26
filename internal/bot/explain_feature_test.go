@@ -159,3 +159,31 @@ func TestShouldRespondInBurmese(t *testing.T) {
 		t.Fatal("expected Burmese quote text to trigger Burmese response")
 	}
 }
+
+func TestIsQuotedFromBot(t *testing.T) {
+	prevBotUserID := botUserID
+	botUserID = 42
+	defer func() { botUserID = prevBotUserID }()
+
+	t.Run("true when replied message is from this bot", func(t *testing.T) {
+		msg := &models.Message{
+			ReplyToMessage: &models.Message{
+				From: &models.User{ID: 42, IsBot: true},
+			},
+		}
+		if !isQuotedFromBot(msg) {
+			t.Fatal("expected true")
+		}
+	})
+
+	t.Run("false when replied message is from another user", func(t *testing.T) {
+		msg := &models.Message{
+			ReplyToMessage: &models.Message{
+				From: &models.User{ID: 7, IsBot: false},
+			},
+		}
+		if isQuotedFromBot(msg) {
+			t.Fatal("expected false")
+		}
+	})
+}

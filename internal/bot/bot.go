@@ -27,6 +27,7 @@ var (
 	symbolRegex   = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
 	textExplainer *geminiExplainer
 	botMention    string
+	botUserID     int64
 	allowedGroups map[int64]struct{}
 )
 
@@ -72,6 +73,7 @@ func Run() error {
 	if me.Username != "" {
 		botMention = "@" + strings.ToLower(me.Username)
 	}
+	botUserID = me.ID
 	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler, requestLoggingMiddleware)
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
@@ -243,7 +245,7 @@ func isGroupLikeChat(chatType models.ChatType) bool {
 }
 
 func startAllowedGroupsReporter(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	for {
@@ -271,7 +273,7 @@ func logAllowedGroups(message string) {
 
 func logIncomingUpdate(update *models.Update, matched bool) {
 	if update == nil {
-		log.Info().Bool("matched_handler", matched).Msg("incoming telegram update")
+		log.Info().Bool("matched_handler", matched).Msg("Incoming telegram update")
 		return
 	}
 
@@ -410,6 +412,18 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		})
 		return
 	}
+	if isQuotedFromBot(update.Message) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "I can only explain messages from other users.",
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
 
 	thinkingMsg, thinkingErr := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -490,6 +504,16 @@ func extractQuotedText(message *models.Message) string {
 	}
 
 	return ""
+}
+
+func isQuotedFromBot(message *models.Message) bool {
+	if message == nil || message.ReplyToMessage == nil || message.ReplyToMessage.From == nil {
+		return false
+	}
+	if botUserID == 0 {
+		return message.ReplyToMessage.From.IsBot
+	}
+	return message.ReplyToMessage.From.ID == botUserID
 }
 
 func shouldRespondInBurmese(texts ...string) bool {

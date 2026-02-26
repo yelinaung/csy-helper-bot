@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"google.golang.org/genai"
 )
 
@@ -30,6 +31,17 @@ var explainTones = []string{
 	"direct",
 	"encouraging",
 	"dramatic",
+}
+
+var toneEmoji = map[string]string{
+	"funny":       "😄",
+	"sarcastic":   "😏",
+	"formal":      "🙂",
+	"emo":         "🥺",
+	"friendly":    "😊",
+	"direct":      "😐",
+	"encouraging": "💪",
+	"dramatic":    "😱",
 }
 
 type geminiContentGenerator interface {
@@ -78,6 +90,10 @@ func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, 
 		languageInstruction = "မြန်မာလို ပြန်ဖြေပါ"
 	}
 	tone := pickRandomTone()
+	log.Info().
+		Str("tone", tone).
+		Bool("respond_in_burmese", respondInBurmese).
+		Msg("Selected explanation tone")
 
 	prompt := fmt.Sprintf(`Explain the following message in simple terms.
 Keep it concise and practical. Use plain language.
@@ -124,7 +140,9 @@ Message:
 		return "", errors.New("empty explanation from Gemini")
 	}
 
-	out = out + "\n\n[Tone: " + tone + "]"
+	if emoji := emojiForTone(tone); emoji != "" {
+		out = emoji + " " + out
+	}
 
 	if len(out) > maxExplainResponseLength {
 		out = strings.TrimSpace(out[:maxExplainResponseLength-3]) + "..."
@@ -157,4 +175,11 @@ func pickRandomTone() string {
 	}
 
 	return explainTones[nBig.Int64()]
+}
+
+func emojiForTone(tone string) string {
+	if emoji, ok := toneEmoji[tone]; ok {
+		return emoji
+	}
+	return "🙂"
 }

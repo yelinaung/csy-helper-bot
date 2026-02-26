@@ -50,10 +50,6 @@ func newGeminiExplainer(ctx context.Context, apiKey string) (*geminiExplainer, e
 	}, nil
 }
 
-func (g *geminiExplainer) explain(ctx context.Context, text string) (string, error) {
-	return g.explainWithLanguage(ctx, text, false)
-}
-
 func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, respondInBurmese bool) (string, error) {
 	if g == nil || g.generator == nil {
 		return "", errors.New("gemini client not initialized")
@@ -66,7 +62,7 @@ func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, 
 
 	languageInstruction := "Respond in English."
 	if respondInBurmese {
-		languageInstruction = "Respond in Burmese."
+		languageInstruction = "မြန်မာလို ပြန်ဖြေပါ"
 	}
 
 	prompt := fmt.Sprintf(`Explain the following message in simple terms.

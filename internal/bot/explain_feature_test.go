@@ -77,7 +77,7 @@ func TestGeminiExplainer_ExplainTimeout(t *testing.T) {
 		generator: &mockContentGenerator{err: context.DeadlineExceeded},
 	}
 
-	_, err := explainer.explain(context.Background(), "hello")
+	_, err := explainer.explainWithLanguage(context.Background(), "hello", false)
 	if !errors.Is(err, ErrExplainTimeout) {
 		t.Fatalf("expected ErrExplainTimeout, got %v", err)
 	}
@@ -101,7 +101,7 @@ func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 		},
 	}
 
-	got, err := explainer.explain(context.Background(), "hello")
+	got, err := explainer.explainWithLanguage(context.Background(), "hello", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

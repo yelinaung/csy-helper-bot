@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/go-telegram/bot v1.19.0
 	github.com/joho/godotenv v1.5.1
+	github.com/rs/zerolog v1.33.0
 	google.golang.org/genai v1.47.0
 )
 
@@ -17,6 +18,8 @@ require (
 	github.com/google/s2a-go v0.1.8 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.19 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/net v0.38.0 // indirect

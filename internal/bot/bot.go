@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -46,8 +46,7 @@ func Run() error {
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
-			// Silent handler - do nothing for unmatched updates
-			// This suppresses the default "[TGBOT] [UPDATE]" verbose logging
+			logIncomingUpdate(update, false)
 		}),
 	}
 
@@ -56,12 +55,12 @@ func Run() error {
 		return err
 	}
 
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, startHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, helpHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/lc", bot.MatchTypeExact, lcHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, startHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, helpHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/lc", bot.MatchTypeExact, lcHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler, requestLoggingMiddleware)
 
 	me, err := b.GetMe(ctx)
 	if err != nil {
@@ -70,19 +69,19 @@ func Run() error {
 	if me.Username != "" {
 		botMention = "@" + strings.ToLower(me.Username)
 	}
-	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler)
+	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler, requestLoggingMiddleware)
 
 	var initErr error
 	textExplainer, initErr = initGeminiExplainer()
 	if initErr != nil {
-		log.Printf("Gemini explainer disabled: %v", initErr)
+		log.Warn().Err(initErr).Msg("Gemini explainer disabled")
 	} else {
-		log.Println("Gemini explainer initialized")
+		log.Info().Msg("Gemini explainer initialized")
 	}
 
 	go startHealthServer()
 
-	log.Println("Bot started...")
+	log.Info().Msg("Bot started")
 	b.Start(ctx)
 	return nil
 }
@@ -92,6 +91,10 @@ func startHealthServer() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		log.Info().
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Msg("incoming HTTP request")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
@@ -105,9 +108,9 @@ func startHealthServer() {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	log.Print("Health server listening")
+	log.Info().Msg("Health server listening")
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("Health server error: %v", err)
+		log.Error().Err(err).Msg("Health server error")
 	}
 }
 
@@ -123,6 +126,39 @@ func normalizePort(raw string) string {
 	}
 
 	return strconv.Itoa(p)
+}
+
+func requestLoggingMiddleware(next bot.HandlerFunc) bot.HandlerFunc {
+	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		logIncomingUpdate(update, true)
+		next(ctx, b, update)
+	}
+}
+
+func logIncomingUpdate(update *models.Update, matched bool) {
+	if update == nil {
+		log.Info().Bool("matched_handler", matched).Msg("incoming telegram update")
+		return
+	}
+
+	event := log.Info().
+		Int64("update_id", update.ID).
+		Bool("matched_handler", matched)
+
+	switch {
+	case update.Message != nil:
+		event = event.
+			Str("update_type", "message").
+			Str("chat_type", string(update.Message.Chat.Type)).
+			Bool("has_text", update.Message.Text != "").
+			Bool("is_reply", update.Message.ReplyToMessage != nil)
+	case update.CallbackQuery != nil:
+		event = event.Str("update_type", "callback_query")
+	default:
+		event = event.Str("update_type", "other")
+	}
+
+	event.Msg("incoming telegram update")
 }
 
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -151,7 +187,7 @@ Mention + "explain me this" - Explain the replied message (e.g., @%s explain me 
 func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	question, err := fetchDailyLeetCode(ctx)
 	if err != nil {
-		log.Printf("Failed to fetch LeetCode daily question: %v", err)
+		log.Error().Err(err).Msg("Failed to fetch LeetCode daily question")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -191,7 +227,7 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
-		log.Printf("Failed to fetch stock quote for %s: %v", symbol, err)
+		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -202,7 +238,7 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	profile, err := fetchCompanyProfile(ctx, symbol)
 	if err != nil {
-		log.Printf("Failed to fetch company profile for %s: %v", symbol, err)
+		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to fetch company profile")
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -243,7 +279,7 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	explanation, err := textExplainer.explain(ctx, quotedText)
 	if err != nil {
-		log.Printf("Failed to explain quoted message: %v", err)
+		log.Error().Err(err).Msg("Failed to explain quoted message")
 
 		errText := "Failed to explain this message. Please try again later."
 		if errors.Is(err, ErrExplainTimeout) {

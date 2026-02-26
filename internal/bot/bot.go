@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ var (
 	symbolRegex   = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
 	textExplainer *geminiExplainer
 	botMention    string
+	allowedGroups map[int64]struct{}
 )
 
 const (
@@ -47,6 +49,7 @@ func Run() error {
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
 			logIncomingUpdate(update, false)
+			enforceChatAccess(ctx, b, update)
 		}),
 	}
 
@@ -71,6 +74,12 @@ func Run() error {
 	}
 	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler, requestLoggingMiddleware)
 
+	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
+	if err != nil {
+		return fmt.Errorf("failed to parse ALLOWED_GROUP_IDS: %w", err)
+	}
+	logAllowedGroups("Loaded allowed group configuration")
+
 	var initErr error
 	textExplainer, initErr = initGeminiExplainer()
 	if initErr != nil {
@@ -80,6 +89,7 @@ func Run() error {
 	}
 
 	go startHealthServer()
+	go startAllowedGroupsReporter(ctx)
 
 	log.Info().Msg("Bot started")
 	b.Start(ctx)
@@ -131,8 +141,132 @@ func normalizePort(raw string) string {
 func requestLoggingMiddleware(next bot.HandlerFunc) bot.HandlerFunc {
 	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
 		logIncomingUpdate(update, true)
+		if !enforceChatAccess(ctx, b, update) {
+			return
+		}
 		next(ctx, b, update)
 	}
+}
+
+func parseAllowedGroupIDs(raw string) (map[int64]struct{}, error) {
+	result := make(map[int64]struct{})
+	if strings.TrimSpace(raw) == "" {
+		return result, nil
+	}
+
+	for token := range strings.SplitSeq(raw, ",") {
+		idText := strings.TrimSpace(token)
+		if idText == "" {
+			continue
+		}
+
+		id, err := strconv.ParseInt(idText, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid group id %q: %w", idText, err)
+		}
+		result[id] = struct{}{}
+	}
+
+	return result, nil
+}
+
+func enforceChatAccess(ctx context.Context, b *bot.Bot, update *models.Update) bool {
+	chat := extractChatFromUpdate(update)
+	if chat == nil {
+		return true
+	}
+	if !isGroupLikeChat(chat.Type) {
+		log.Info().
+			Int64("chat_id", chat.ID).
+			Str("chat_type", string(chat.Type)).
+			Msg("Ignoring non-group chat")
+		return false
+	}
+	if _, ok := allowedGroups[chat.ID]; ok {
+		log.Info().
+			Int64("chat_id", chat.ID).
+			Str("chat_type", string(chat.Type)).
+			Bool("allowed", true).
+			Msg("Group activity")
+		return true
+	}
+
+	log.Warn().
+		Int64("chat_id", chat.ID).
+		Str("chat_type", string(chat.Type)).
+		Bool("allowed", false).
+		Msg("Group activity; leaving unauthorized group")
+	_, err := b.LeaveChat(ctx, &bot.LeaveChatParams{ChatID: chat.ID})
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int64("chat_id", chat.ID).
+			Msg("Failed to leave unauthorized group")
+	}
+	return false
+}
+
+func extractChatFromUpdate(update *models.Update) *models.Chat {
+	if update == nil {
+		return nil
+	}
+	if update.Message != nil {
+		return &update.Message.Chat
+	}
+	if update.EditedMessage != nil {
+		return &update.EditedMessage.Chat
+	}
+	if update.ChannelPost != nil {
+		return &update.ChannelPost.Chat
+	}
+	if update.EditedChannelPost != nil {
+		return &update.EditedChannelPost.Chat
+	}
+	if update.MyChatMember != nil {
+		return &update.MyChatMember.Chat
+	}
+	if update.ChatMember != nil {
+		return &update.ChatMember.Chat
+	}
+	if update.ChatJoinRequest != nil {
+		return &update.ChatJoinRequest.Chat
+	}
+	if update.CallbackQuery != nil && update.CallbackQuery.Message.Type == models.MaybeInaccessibleMessageTypeMessage &&
+		update.CallbackQuery.Message.Message != nil {
+		return &update.CallbackQuery.Message.Message.Chat
+	}
+	return nil
+}
+
+func isGroupLikeChat(chatType models.ChatType) bool {
+	return chatType == models.ChatTypeGroup || chatType == models.ChatTypeSupergroup
+}
+
+func startAllowedGroupsReporter(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			logAllowedGroups("Allowed group configuration heartbeat")
+		}
+	}
+}
+
+func logAllowedGroups(message string) {
+	ids := make([]int64, 0, len(allowedGroups))
+	for id := range allowedGroups {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	log.Info().
+		Int("allowed_group_count", len(ids)).
+		Interface("allowed_group_ids", ids).
+		Msg(message)
 }
 
 func logIncomingUpdate(update *models.Update, matched bool) {

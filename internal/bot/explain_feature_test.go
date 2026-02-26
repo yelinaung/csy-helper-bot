@@ -1,0 +1,114 @@
+package bot
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/go-telegram/bot/models"
+	"google.golang.org/genai"
+)
+
+type mockContentGenerator struct {
+	resp *genai.GenerateContentResponse
+	err  error
+}
+
+func (m *mockContentGenerator) GenerateContent(
+	context.Context,
+	string,
+	[]*genai.Content,
+	*genai.GenerateContentConfig,
+) (*genai.GenerateContentResponse, error) {
+	return m.resp, m.err
+}
+
+func TestExtractQuotedText(t *testing.T) {
+	t.Run("uses replied message text", func(t *testing.T) {
+		msg := &models.Message{
+			ReplyToMessage: &models.Message{Text: "  hello world  "},
+		}
+		got := extractQuotedText(msg)
+		if got != "hello world" {
+			t.Fatalf("expected replied text, got %q", got)
+		}
+	})
+
+	t.Run("uses replied message caption when text absent", func(t *testing.T) {
+		msg := &models.Message{
+			ReplyToMessage: &models.Message{Caption: "  image caption  "},
+		}
+		got := extractQuotedText(msg)
+		if got != "image caption" {
+			t.Fatalf("expected caption, got %q", got)
+		}
+	})
+
+	t.Run("falls back to quote text", func(t *testing.T) {
+		msg := &models.Message{
+			Quote: &models.TextQuote{Text: "  quoted snippet  "},
+		}
+		got := extractQuotedText(msg)
+		if got != "quoted snippet" {
+			t.Fatalf("expected quote text, got %q", got)
+		}
+	})
+
+	t.Run("returns empty when nothing to explain", func(t *testing.T) {
+		msg := &models.Message{}
+		got := extractQuotedText(msg)
+		if got != "" {
+			t.Fatalf("expected empty text, got %q", got)
+		}
+	})
+}
+
+func TestSanitizeForPrompt(t *testing.T) {
+	got := sanitizeForPrompt("  a\tb\n\"c` \x00 d  ", 100)
+	want := "a b 'c' d"
+	if got != want {
+		t.Fatalf("sanitizeForPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestGeminiExplainer_ExplainTimeout(t *testing.T) {
+	explainer := &geminiExplainer{
+		generator: &mockContentGenerator{err: context.DeadlineExceeded},
+	}
+
+	_, err := explainer.explain(context.Background(), "hello")
+	if !errors.Is(err, ErrExplainTimeout) {
+		t.Fatalf("expected ErrExplainTimeout, got %v", err)
+	}
+}
+
+func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
+	longText := strings.Repeat("a", maxExplainResponseLength+200)
+	explainer := &geminiExplainer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{
+						Content: &genai.Content{
+							Parts: []*genai.Part{
+								{Text: longText},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := explainer.explain(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != maxExplainResponseLength {
+		t.Fatalf("expected truncated length %d, got %d", maxExplainResponseLength, len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected truncated suffix ..., got %q", got[len(got)-10:])
+	}
+}

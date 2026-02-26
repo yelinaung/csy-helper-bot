@@ -1,9 +1,10 @@
-package main
+package bot
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,8 +21,9 @@ import (
 )
 
 var (
-	httpClient  = &http.Client{Timeout: 10 * time.Second}
-	symbolRegex = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
+	httpClient    = &http.Client{Timeout: 10 * time.Second}
+	symbolRegex   = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
+	textExplainer *geminiExplainer
 )
 
 const (
@@ -29,7 +31,7 @@ const (
 	leetCodeGraphQLURL = "https://leetcode.com/graphql"
 )
 
-func main() {
+func Run() error {
 	_ = godotenv.Load()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -37,7 +39,7 @@ func main() {
 
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if token == "" {
-		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
+		return errors.New("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
 
 	opts := []bot.Option{
@@ -49,7 +51,7 @@ func main() {
 
 	b, err := bot.New(token, opts...)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, startHandler)
@@ -58,11 +60,21 @@ func main() {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "explain me this", bot.MatchTypeExact, explainHandler)
+
+	var initErr error
+	textExplainer, initErr = initGeminiExplainer()
+	if initErr != nil {
+		log.Printf("Gemini explainer disabled: %v", initErr)
+	} else {
+		log.Println("Gemini explainer initialized")
+	}
 
 	go startHealthServer()
 
 	log.Println("Bot started...")
 	b.Start(ctx)
+	return nil
 }
 
 func startHealthServer() {
@@ -88,7 +100,7 @@ func startHealthServer() {
 
 	log.Printf("Health server listening on port %s", port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Health server error: %v", err)
+		log.Printf("Health server error: %v", err)
 	}
 }
 
@@ -105,7 +117,8 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /start - Start the bot
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
-!s SYMBOL - Get stock price (e.g., !s AAPL)`
+!s SYMBOL - Get stock price (e.g., !s AAPL)
+Reply with "explain me this" - Explain the replied message`
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -176,6 +189,86 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            formatStockMessage(symbol, quote, profile),
 	})
+}
+
+func initGeminiExplainer() (*geminiExplainer, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, errors.New("GEMINI_API_KEY not configured")
+	}
+
+	return newGeminiExplainer(context.Background(), apiKey)
+}
+
+func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if textExplainer == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Explain feature is not configured. Please set GEMINI_API_KEY.",
+		})
+		return
+	}
+
+	quotedText := extractQuotedText(update.Message)
+	if quotedText == "" {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            `Reply to a text message and send "explain me this".`,
+		})
+		return
+	}
+
+	explanation, err := textExplainer.explain(ctx, quotedText)
+	if err != nil {
+		log.Printf("Failed to explain quoted message: %v", err)
+
+		errText := "Failed to explain this message. Please try again later."
+		if errors.Is(err, ErrExplainTimeout) {
+			errText = "Explanation timed out. Please try again."
+		}
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            errText,
+		})
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            explanation,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+}
+
+func extractQuotedText(message *models.Message) string {
+	if message == nil {
+		return ""
+	}
+
+	if message.ReplyToMessage != nil {
+		if txt := strings.TrimSpace(message.ReplyToMessage.Text); txt != "" {
+			return txt
+		}
+		if caption := strings.TrimSpace(message.ReplyToMessage.Caption); caption != "" {
+			return caption
+		}
+	}
+
+	if message.Quote != nil {
+		if quoteText := strings.TrimSpace(message.Quote.Text); quoteText != "" {
+			return quoteText
+		}
+	}
+
+	return ""
 }
 
 type StockQuote struct {

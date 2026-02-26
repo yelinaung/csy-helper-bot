@@ -12,6 +12,7 @@ A Telegram bot that provides helpful utilities for developers.
 
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
+- Reply with `explain me this` - Explains the replied message using Gemini
 
 ## Setup
 
@@ -21,10 +22,11 @@ A Telegram bot that provides helpful utilities for developers.
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
+   GEMINI_API_KEY=your_gemini_key_here
    ```
 4. Run the bot:
    ```bash
-   go run .
+   go run ./cmd/csy-helper-bot
    ```
 
 ## Deployment

@@ -1,1 +1,1 @@
-web: ./csy-helper-bot
+web: go run ./cmd/csy-helper-bot

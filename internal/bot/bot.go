@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,10 +79,7 @@ func Run() error {
 }
 
 func startHealthServer() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "5000"
-	}
+	port := normalizePort(os.Getenv("PORT"))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -98,10 +96,24 @@ func startHealthServer() {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	log.Printf("Health server listening on port %s", port)
+	log.Print("Health server listening")
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("Health server error: %v", err)
 	}
+}
+
+func normalizePort(raw string) string {
+	const defaultPort = "5000"
+	if raw == "" {
+		return defaultPort
+	}
+
+	p, err := strconv.Atoi(raw)
+	if err != nil || p < 1 || p > 65535 {
+		return defaultPort
+	}
+
+	return strconv.Itoa(p)
 }
 
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -283,15 +295,15 @@ type StockQuote struct {
 
 type CompanyProfile struct {
 	Name                 string  `json:"name"`
-	MarketCapitalization float64 `json:"marketCapitalization"`
-	Industry             string  `json:"finnhubIndustry"`
+	MarketCapitalization float64 `json:"marketCapitalization"` //nolint:tagliatelle // Finnhub response uses camelCase.
+	Industry             string  `json:"finnhubIndustry"`      //nolint:tagliatelle // Finnhub response uses camelCase.
 	Exchange             string  `json:"exchange"`
 }
 
 func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("FINNHUB_API_KEY not configured")
+		return nil, errors.New("FINNHUB_API_KEY not configured")
 	}
 	return fetchStockQuoteFromURL(ctx, finnhubBaseURL, symbol, apiKey)
 }
@@ -311,7 +323,7 @@ func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string)
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +339,7 @@ func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string)
 	}
 
 	if quote.CurrentPrice == 0 {
-		return nil, fmt.Errorf("symbol not found or no data available")
+		return nil, errors.New("symbol not found or no data available")
 	}
 
 	return &quote, nil
@@ -336,7 +348,7 @@ func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string)
 func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, error) {
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("FINNHUB_API_KEY not configured")
+		return nil, errors.New("FINNHUB_API_KEY not configured")
 	}
 	return fetchCompanyProfileFromURL(ctx, finnhubBaseURL, symbol, apiKey)
 }
@@ -356,7 +368,7 @@ func fetchCompanyProfileFromURL(ctx context.Context, baseURL, symbol, apiKey str
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +402,7 @@ func formatStockMessage(symbol string, quote *StockQuote, profile *CompanyProfil
 			marketCapStr = fmt.Sprintf("\n🏢 Market Cap: $%.2fB", profile.MarketCapitalization/1000)
 		}
 		if profile.Industry != "" {
-			industryStr = fmt.Sprintf("\n🏭 Industry: %s", profile.Industry)
+			industryStr = "\n🏭 Industry: " + profile.Industry
 		}
 	}
 
@@ -440,10 +452,10 @@ type graphQLResponse struct {
 		ActiveDailyCodingChallengeQuestion struct {
 			Question struct {
 				Title      string `json:"title"`
-				TitleSlug  string `json:"titleSlug"`
+				TitleSlug  string `json:"titleSlug"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
 				Difficulty string `json:"difficulty"`
 			} `json:"question"`
-		} `json:"activeDailyCodingChallengeQuestion"`
+		} `json:"activeDailyCodingChallengeQuestion"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
 	} `json:"data"`
 }
 
@@ -474,7 +486,7 @@ func fetchDailyLeetCodeFromURL(ctx context.Context, apiURL string) (*LeetCodeQue
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +507,7 @@ func fetchDailyLeetCodeFromURL(ctx context.Context, apiURL string) (*LeetCodeQue
 
 	q := gqlResp.Data.ActiveDailyCodingChallengeQuestion.Question
 	if q.Title == "" || q.TitleSlug == "" || q.Difficulty == "" {
-		return nil, fmt.Errorf("daily question data missing")
+		return nil, errors.New("daily question data missing")
 	}
 
 	return &LeetCodeQuestion{

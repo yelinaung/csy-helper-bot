@@ -5,6 +5,13 @@ run = [
   "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go test -v ./...",
 ]
 
+[tasks.lint]
+description = "Run golangci-lint with project config"
+run = [
+  "mkdir -p .cache/go-build .cache/go-mod",
+  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod golangci-lint run --config .golangci.yml ./...",
+]
+
 [tasks.push-all]
 description = "Pull with rebase from github, then push current branch to all remotes"
 run = [

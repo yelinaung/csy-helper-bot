@@ -2,8 +2,10 @@ package bot
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -18,6 +20,17 @@ const (
 )
 
 var ErrExplainTimeout = errors.New("explain request timed out")
+
+var explainTones = []string{
+	"funny",
+	"sarcastic",
+	"formal",
+	"emo",
+	"friendly",
+	"direct",
+	"encouraging",
+	"dramatic",
+}
 
 type geminiContentGenerator interface {
 	GenerateContent(
@@ -64,13 +77,15 @@ func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, 
 	if respondInBurmese {
 		languageInstruction = "မြန်မာလို ပြန်ဖြေပါ"
 	}
+	tone := pickRandomTone()
 
 	prompt := fmt.Sprintf(`Explain the following message in simple terms.
 Keep it concise and practical. Use plain language.
 %s
+Use a %s tone.
 
 Message:
-"%s"`, languageInstruction, sanitized)
+"%s"`, languageInstruction, tone, sanitized)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, explainTimeout)
 	defer cancel()
@@ -127,4 +142,17 @@ func sanitizeForPrompt(input string, maxLength int) string {
 	}
 
 	return input
+}
+
+func pickRandomTone() string {
+	if len(explainTones) == 0 {
+		return "neutral"
+	}
+
+	nBig, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(explainTones))))
+	if err != nil {
+		return explainTones[0]
+	}
+
+	return explainTones[nBig.Int64()]
 }

@@ -12,7 +12,18 @@ A Telegram bot that provides helpful utilities for developers.
 
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
-- Reply with `explain me this` - Explains the replied message using Gemini
+- `@<bot_username> explain me this` (as a reply) - Explains the replied message using Gemini
+- `@<bot_username> ask <question>` - Asks a direct question without quoting a message
+- Burmese-aware answers:
+  - If requester text or quoted text contains Burmese, answer in Burmese
+- Tone/persona variation:
+  - Random tone per explain/ask response with matching facial-expression emoji
+- In-memory rate limiting for explain/ask requests
+- Group allowlist enforcement:
+  - Bot is active only in allowlisted groups/supergroups
+  - Bot ignores private chats
+  - Bot leaves unauthorized groups automatically
+- Structured logging with human-readable console output (zerolog)
 
 ## Setup
 
@@ -23,11 +34,30 @@ A Telegram bot that provides helpful utilities for developers.
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
    GEMINI_API_KEY=your_gemini_key_here
+   ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
+   EXPLAIN_RATE_LIMIT_COUNT=5
+   EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
+   LOG_LEVEL=info
    ```
 4. Run the bot:
    ```bash
    go run ./cmd/csy-helper-bot
    ```
+
+## Usage
+
+- Explain quoted message:
+  - Reply to a message in an allowed group and send:
+    - `@<bot_username> explain me this`
+- Ask directly:
+  - `@<bot_username> ask what does mutex mean?`
+
+## Access Control
+
+- The bot only responds in `group` / `supergroup` chats.
+- Private chats are ignored.
+- Groups must be listed in `ALLOWED_GROUP_IDS`.
+- If a group is not allowlisted, the bot leaves that group.
 
 ## Deployment
 
@@ -35,7 +65,13 @@ A Telegram bot that provides helpful utilities for developers.
 
 ```bash
 docker build -t csy-helper-bot .
-docker run -e TELEGRAM_BOT_TOKEN=your_token -e FINNHUB_API_KEY=your_key csy-helper-bot
+docker run \
+  -e TELEGRAM_BOT_TOKEN=your_token \
+  -e FINNHUB_API_KEY=your_key \
+  -e GEMINI_API_KEY=your_gemini_key \
+  -e ALLOWED_GROUP_IDS=-1001234567890 \
+  -e LOG_LEVEL=info \
+  csy-helper-bot
 ```
 
 ### Dokku
@@ -45,6 +81,11 @@ docker run -e TELEGRAM_BOT_TOKEN=your_token -e FINNHUB_API_KEY=your_key csy-help
 dokku apps:create csy-helper-bot
 dokku config:set csy-helper-bot TELEGRAM_BOT_TOKEN=your_token
 dokku config:set csy-helper-bot FINNHUB_API_KEY=your_key
+dokku config:set csy-helper-bot GEMINI_API_KEY=your_gemini_key
+dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
+dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5
+dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
+dokku config:set csy-helper-bot LOG_LEVEL=info
 
 # On your local machine
 git remote add dokku dokku@your-server:csy-helper-bot
@@ -53,7 +94,7 @@ git push dokku master
 
 ## Group Privacy
 
-If using `!lc` or `!s` in groups, you may need to disable Group Privacy Mode via [@BotFather](https://t.me/BotFather) → Bot Settings → Group Privacy → Turn off.
+If using commands via mention in groups, you may need to disable Group Privacy Mode via [@BotFather](https://t.me/BotFather) → Bot Settings → Group Privacy → Turn off.
 
 ## Troubleshooting
 

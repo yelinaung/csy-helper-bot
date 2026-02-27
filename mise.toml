@@ -24,3 +24,25 @@ run = [
   "git push github \"$(git branch --show-current)\"",
   "git push gitlab \"$(git branch --show-current)\"",
 ]
+
+[tasks.run]
+description = "Run the bot with automatic SOPS decryption"
+run = [
+  "mkdir -p .cache/go-build .cache/go-mod",
+  "sops exec-env .env 'GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go run ./cmd/csy-helper-bot'",
+]
+
+[tasks.build]
+description = "Build the bot binary"
+run = [
+  "mkdir -p .cache/go-build .cache/go-mod",
+  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go build -o csy-helper-bot ./cmd/csy-helper-bot",
+]
+
+[tasks.decrypt]
+description = "Decrypt .env file to stdout"
+run = ["sops --decrypt .env"]
+
+[tasks.edit-env]
+description = "Edit encrypted .env file (auto-encrypts on save)"
+run = ["sops .env"]

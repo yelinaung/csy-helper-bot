@@ -17,7 +17,6 @@ go.work
 go.work.sum
 
 # Environment variables
-.env
 .env.local
 .env.*
 
@@ -36,3 +35,10 @@ Thumbs.db
 .cache/
 
 .claude
+
+# SOPS / Environment
+.env
+.env.backup
+.env.decrypted
+*.decrypted
+.sops.yaml

@@ -23,12 +23,13 @@ import (
 )
 
 var (
-	httpClient    = &http.Client{Timeout: 10 * time.Second}
-	symbolRegex   = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
-	textExplainer *geminiExplainer
-	botMention    string
-	botUserID     int64
-	allowedGroups map[int64]struct{}
+	httpClient     = &http.Client{Timeout: 10 * time.Second}
+	symbolRegex    = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
+	textExplainer  *geminiExplainer
+	explainLimiter *memoryRateLimiter
+	botMention     string
+	botUserID      int64
+	allowedGroups  map[int64]struct{}
 )
 
 const (
@@ -89,6 +90,7 @@ func Run() error {
 	} else {
 		log.Info().Msg("Gemini explainer initialized")
 	}
+	explainLimiter = loadExplainRateLimiter()
 
 	go startHealthServer()
 	go startAllowedGroupsReporter(ctx)
@@ -404,19 +406,37 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	quotedText := extractQuotedText(update.Message)
-	if quotedText == "" {
+	question := extractQuestion(update.Message.Text)
+
+	if quotedText == "" && question == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf(`Reply to a text message and send "%s explain me this".`, botMention),
+			Text: fmt.Sprintf(
+				`Reply to a message with "%s explain me this" or ask directly with "%s explain me this question: your question here".`,
+				botMention, botMention,
+			),
 		})
 		return
 	}
-	if isQuotedFromBot(update.Message) {
+	if quotedText != "" && isQuotedFromBot(update.Message) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
 			Text:            "I can only explain messages from other users.",
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
+
+	if !allowExplainRequest(update.Message) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Rate limit reached for explain requests. Please try again shortly.",
 			ReplyParameters: &models.ReplyParameters{
 				MessageID:                update.Message.ID,
 				AllowSendingWithoutReply: true,
@@ -435,8 +455,8 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		},
 	})
 
-	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText)
-	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, respondInBurmese)
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText, question)
+	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, question, respondInBurmese)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to explain quoted message")
 
@@ -450,6 +470,20 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+func extractQuestion(messageText string) string {
+	// "question:" is pure ASCII, so its byte length is stable across
+	// case-folding.  We just need to find it case-insensitively in the
+	// original string without going through a lowercased copy (whose byte
+	// offsets can diverge from the original for non-ASCII text).
+	const keyword = "question:"
+	for i := 0; i+len(keyword) <= len(messageText); i++ {
+		if strings.EqualFold(messageText[i:i+len(keyword)], keyword) {
+			return strings.TrimSpace(messageText[i+len(keyword):])
+		}
+	}
+	return ""
 }
 
 func sendOrEditExplainResult(
@@ -556,6 +590,24 @@ func shouldHandleExplainMention(update *models.Update) bool {
 	}
 
 	return false
+}
+
+func allowExplainRequest(message *models.Message) bool {
+	if message == nil {
+		return false
+	}
+	if explainLimiter == nil {
+		return true
+	}
+
+	var userID int64
+	if message.From != nil {
+		userID = message.From.ID
+	}
+
+	key := buildExplainRateKey(message.Chat.ID, userID)
+	allowed, _ := explainLimiter.allow(key, time.Now())
+	return allowed
 }
 
 type StockQuote struct {

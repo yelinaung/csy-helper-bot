@@ -88,4 +88,12 @@ jobs:
         run: go test -v ./...
 
       - name: Run fuzz tests
-        run: go test -run=^$ -fuzz=Fuzz -fuzztime=20s ./internal/bot
+        run: |
+          for target in \
+            FuzzUTF16EntityRangeToByteRange \
+            FuzzMentionAndSuffixAtEntity \
+            FuzzShouldHandleAskMention \
+            FuzzSanitizeForPrompt \
+            FuzzExplainPromptConstruction; do
+            go test -run=^$ -fuzz="$target" -fuzztime=20s ./internal/bot
+          done

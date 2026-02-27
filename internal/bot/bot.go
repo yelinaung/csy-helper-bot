@@ -297,7 +297,7 @@ func logIncomingUpdate(update *models.Update, matched bool) {
 		event = event.Str("update_type", "other")
 	}
 
-	event.Msg("incoming telegram update")
+	event.Msg("Incoming telegram update")
 }
 
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {

@@ -75,6 +75,7 @@ func Run() error {
 		botMention = "@" + strings.ToLower(me.Username)
 	}
 	botUserID = me.ID
+	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, requestLoggingMiddleware)
 	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler, requestLoggingMiddleware)
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
@@ -313,7 +314,8 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
-Mention + "explain me this" - Explain the replied message (e.g., @%s explain me this)`, strings.TrimPrefix(botMention, "@"))
+Mention + "explain me this" - Explain the replied message (e.g., @%s explain me this)
+Mention + "ask" - Ask a question (e.g., @%s ask what is a mutex?)`, strings.TrimPrefix(botMention, "@"), strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -406,16 +408,12 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	quotedText := extractQuotedText(update.Message)
-	question := extractQuestion(update.Message.Text)
 
-	if quotedText == "" && question == "" {
+	if quotedText == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text: fmt.Sprintf(
-				`Reply to a message with "%s explain me this" or ask directly with "%s explain me this question: your question here".`,
-				botMention, botMention,
-			),
+			Text:            fmt.Sprintf(`Reply to a text message and send "%s explain me this".`, botMention),
 		})
 		return
 	}
@@ -455,8 +453,8 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		},
 	})
 
-	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText, question)
-	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, question, respondInBurmese)
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText)
+	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, "", respondInBurmese)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to explain quoted message")
 
@@ -470,20 +468,6 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
-}
-
-func extractQuestion(messageText string) string {
-	// "question:" is pure ASCII, so its byte length is stable across
-	// case-folding.  We just need to find it case-insensitively in the
-	// original string without going through a lowercased copy (whose byte
-	// offsets can diverge from the original for non-ASCII text).
-	const keyword = "question:"
-	for i := 0; i+len(keyword) <= len(messageText); i++ {
-		if strings.EqualFold(messageText[i:i+len(keyword)], keyword) {
-			return strings.TrimSpace(messageText[i+len(keyword):])
-		}
-	}
-	return ""
 }
 
 func sendOrEditExplainResult(
@@ -579,17 +563,190 @@ func shouldHandleExplainMention(update *models.Update) bool {
 		if entity.Type != models.MessageEntityTypeMention {
 			continue
 		}
-		if entity.Offset < 0 || entity.Length <= 0 || entity.Offset+entity.Length > len(update.Message.Text) {
+		mention, _, ok := mentionAndSuffixAtEntity(update.Message.Text, &entity)
+		if !ok {
 			continue
 		}
-
-		mention := strings.ToLower(update.Message.Text[entity.Offset : entity.Offset+entity.Length])
-		if mention == botMention {
+		if strings.EqualFold(mention, botMention) {
 			return true
 		}
 	}
 
 	return false
+}
+
+func shouldHandleAskMention(update *models.Update) bool {
+	if update == nil || update.Message == nil {
+		return false
+	}
+	if botMention == "" {
+		return false
+	}
+
+	messageText := update.Message.Text
+	if strings.TrimSpace(messageText) == "" {
+		return false
+	}
+
+	for _, entity := range update.Message.Entities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		mention, suffix, ok := mentionAndSuffixAtEntity(messageText, &entity)
+		if !ok || !strings.EqualFold(mention, botMention) {
+			continue
+		}
+
+		afterLower := strings.ToLower(strings.TrimSpace(suffix))
+		if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func extractAskQuestion(message *models.Message) string {
+	if message == nil || botMention == "" {
+		return ""
+	}
+
+	text := message.Text
+	for _, entity := range message.Entities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		mention, suffix, ok := mentionAndSuffixAtEntity(text, &entity)
+		if !ok || !strings.EqualFold(mention, botMention) {
+			continue
+		}
+
+		after := strings.TrimSpace(suffix)
+		afterLower := strings.ToLower(after)
+		if afterLower == "ask" {
+			return ""
+		}
+		if strings.HasPrefix(afterLower, "ask ") {
+			return strings.TrimSpace(after[len("ask "):])
+		}
+	}
+
+	return ""
+}
+
+func mentionAndSuffixAtEntity(text string, entity *models.MessageEntity) (mention string, suffix string, ok bool) {
+	if entity == nil {
+		return "", "", false
+	}
+	start, end, ok := utf16EntityRangeToByteRange(text, entity.Offset, entity.Length)
+	if !ok {
+		return "", "", false
+	}
+	return text[start:end], text[end:], true
+}
+
+func utf16EntityRangeToByteRange(text string, offset, length int) (start int, end int, ok bool) {
+	if offset < 0 || length <= 0 {
+		return 0, 0, false
+	}
+
+	targetStart := offset
+	targetEnd := offset + length
+	curUTF16 := 0
+	start = -1
+	end = -1
+
+	for i, r := range text {
+		if curUTF16 == targetStart && start == -1 {
+			start = i
+		}
+		if curUTF16 == targetEnd {
+			end = i
+			break
+		}
+
+		curUTF16 += utf16UnitsForRune(r)
+	}
+
+	if start == -1 && curUTF16 == targetStart {
+		start = len(text)
+	}
+	if end == -1 && curUTF16 == targetEnd {
+		end = len(text)
+	}
+
+	if start == -1 || end == -1 || start > end || end > len(text) {
+		return 0, 0, false
+	}
+
+	return start, end, true
+}
+
+func utf16UnitsForRune(r rune) int {
+	if r > 0xFFFF {
+		return 2
+	}
+	return 1
+}
+
+func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if textExplainer == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Ask feature is not configured. Please set GEMINI_API_KEY.",
+		})
+		return
+	}
+
+	question := extractAskQuestion(update.Message)
+	if question == "" {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            fmt.Sprintf(`Send "%s ask your question here".`, botMention),
+		})
+		return
+	}
+
+	if !allowExplainRequest(update.Message) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Rate limit reached for ask requests. Please try again shortly.",
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
+
+	thinkingMsg, thinkingErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            "thinking...",
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text)
+	explanation, err := textExplainer.explainWithLanguage(ctx, "", question, respondInBurmese)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to answer ask question")
+
+		errText := "Failed to answer your question. Please try again later."
+		if errors.Is(err, ErrExplainTimeout) {
+			errText = "Answer timed out. Please try again."
+		}
+
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
+		return
+	}
+
+	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
 }
 
 func allowExplainRequest(message *models.Message) bool {

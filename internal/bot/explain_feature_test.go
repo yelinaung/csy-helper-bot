@@ -6,10 +6,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot/models"
 	"google.golang.org/genai"
 )
+
+const testBotMention = "@csy_helper_dev_bot"
 
 type mockContentGenerator struct {
 	resp *genai.GenerateContentResponse
@@ -116,18 +119,18 @@ func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 
 func TestShouldHandleExplainMention(t *testing.T) {
 	prevMention := botMention
-	botMention = "@csy_helper_dev_bot"
+	botMention = testBotMention
 	defer func() { botMention = prevMention }()
 
 	t.Run("matches when mention and phrase are present", func(t *testing.T) {
 		update := &models.Update{
 			Message: &models.Message{
-				Text: "@csy_helper_dev_bot explain me this",
+				Text: testBotMention + " explain me this",
 				Entities: []models.MessageEntity{
 					{
 						Type:   models.MessageEntityTypeMention,
 						Offset: 0,
-						Length: len("@csy_helper_dev_bot"),
+						Length: len(testBotMention),
 					},
 				},
 			},
@@ -150,13 +153,13 @@ func TestShouldHandleExplainMention(t *testing.T) {
 }
 
 func TestShouldRespondInBurmese(t *testing.T) {
-	if shouldRespondInBurmese("မင်္ဂလာပါ @csy_helper_dev_bot explain me this") != true {
+	if shouldRespondInBurmese("မင်္ဂလာပါ "+testBotMention+" explain me this") != true {
 		t.Fatal("expected Burmese request to be detected")
 	}
-	if shouldRespondInBurmese("@csy_helper_dev_bot explain me this") != false {
+	if shouldRespondInBurmese(testBotMention+" explain me this") != false {
 		t.Fatal("expected non-Burmese request not to be detected")
 	}
-	if shouldRespondInBurmese("@csy_helper_dev_bot explain me this", "ဆရာငှက်အခွေတွေ ထည့်ထားဒယ်") != true {
+	if shouldRespondInBurmese(testBotMention+" explain me this", "ဆရာငှက်အခွေတွေ ထည့်ထားဒယ်") != true {
 		t.Fatal("expected Burmese quote text to trigger Burmese response")
 	}
 }
@@ -303,43 +306,220 @@ func TestIsQuotedFromBot(t *testing.T) {
 	})
 }
 
-func TestExtractQuestion(t *testing.T) {
-	t.Run("extracts text after question:", func(t *testing.T) {
-		got := extractQuestion("@bot explain me this question: what is a mutex?")
+func TestShouldHandleAskMention(t *testing.T) {
+	prevMention := botMention
+	botMention = testBotMention
+	defer func() { botMention = prevMention }()
+
+	t.Run("matches when mention and ask are present", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " ask what is a mutex?",
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass")
+		}
+	})
+
+	t.Run("matches ask with no question text", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " ask",
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for bare ask")
+		}
+	})
+
+	t.Run("does not match without mention entity", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: "ask what is a mutex?",
+			},
+		}
+		if shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to fail without mention")
+		}
+	})
+
+	t.Run("does not match ask prefix in other words", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " asking why",
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to fail for 'asking'")
+		}
+	})
+
+	t.Run("does not match explain message", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " explain me this",
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to fail for explain message")
+		}
+	})
+}
+
+func TestExtractAskQuestion(t *testing.T) {
+	prevMention := botMention
+	botMention = testBotMention
+	defer func() { botMention = prevMention }()
+
+	t.Run("extracts question after ask", func(t *testing.T) {
+		msg := &models.Message{
+			Text: testBotMention + " ask what is a mutex?",
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: 0, Length: len(testBotMention)},
+			},
+		}
+		got := extractAskQuestion(msg)
 		if got != "what is a mutex?" {
-			t.Fatalf("expected question text, got %q", got)
+			t.Fatalf("expected %q, got %q", "what is a mutex?", got)
 		}
 	})
 
-	t.Run("case insensitive", func(t *testing.T) {
-		got := extractQuestion("@bot explain me this Question: why is this slow?")
-		if got != "why is this slow?" {
-			t.Fatalf("expected question text, got %q", got)
+	t.Run("returns empty when only ask keyword", func(t *testing.T) {
+		msg := &models.Message{
+			Text: testBotMention + " ask",
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: 0, Length: len(testBotMention)},
+			},
 		}
-	})
-
-	t.Run("returns empty when no question keyword", func(t *testing.T) {
-		got := extractQuestion("@bot explain me this")
+		got := extractAskQuestion(msg)
 		if got != "" {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
 
-	t.Run("returns empty when nothing after question:", func(t *testing.T) {
-		got := extractQuestion("@bot explain me this question:   ")
+	t.Run("returns empty for ask-prefixed word", func(t *testing.T) {
+		msg := &models.Message{
+			Text: testBotMention + " asking why",
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: 0, Length: len(testBotMention)},
+			},
+		}
+		got := extractAskQuestion(msg)
 		if got != "" {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
 
-	t.Run("unicode before keyword does not shift result", func(t *testing.T) {
-		// İ (U+0130) uppercases to 2 bytes but lowercases to 3 bytes (i̇),
-		// so a lowered-copy index would be wrong.
-		got := extractQuestion("İ explain question: what is this?")
-		if got != "what is this?" {
-			t.Fatalf("expected %q, got %q", "what is this?", got)
+	t.Run("returns empty when no mention entity", func(t *testing.T) {
+		msg := &models.Message{Text: "ask what is a mutex?"}
+		got := extractAskQuestion(msg)
+		if got != "" {
+			t.Fatalf("expected empty, got %q", got)
 		}
 	})
+
+	t.Run("extracts from second mention when first is not ask", func(t *testing.T) {
+		text := "hey " + testBotMention + " hello " + testBotMention + " ask what is a goroutine?"
+		msg := &models.Message{
+			Text: text,
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: 4, Length: len(testBotMention)},
+				{Type: models.MessageEntityTypeMention, Offset: 4 + len(testBotMention) + 7, Length: len(testBotMention)},
+			},
+		}
+		got := extractAskQuestion(msg)
+		if got != "what is a goroutine?" {
+			t.Fatalf("expected %q, got %q", "what is a goroutine?", got)
+		}
+	})
+
+	t.Run("extracts question with UTF-16 mention offsets", func(t *testing.T) {
+		text := "😀 " + testBotMention + " ask why so slow?"
+		mentionOffset := len(utf16.Encode([]rune("😀 ")))
+		mentionLength := len(utf16.Encode([]rune(testBotMention)))
+
+		msg := &models.Message{
+			Text: text,
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: mentionOffset, Length: mentionLength},
+			},
+		}
+		got := extractAskQuestion(msg)
+		if got != "why so slow?" {
+			t.Fatalf("expected %q, got %q", "why so slow?", got)
+		}
+	})
+}
+
+func TestShouldHandleAskMention_UTF16Offsets(t *testing.T) {
+	prevMention := botMention
+	botMention = testBotMention
+	defer func() { botMention = prevMention }()
+
+	text := "😀 " + testBotMention + " ask what happened?"
+	mentionOffset := len(utf16.Encode([]rune("😀 ")))
+	mentionLength := len(utf16.Encode([]rune(testBotMention)))
+	update := &models.Update{
+		Message: &models.Message{
+			Text: text,
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: mentionOffset, Length: mentionLength},
+			},
+		},
+	}
+	if !shouldHandleAskMention(update) {
+		t.Fatal("expected matcher to pass with UTF-16 offsets")
+	}
+}
+
+func TestShouldHandleExplainMention_UTF16Offsets(t *testing.T) {
+	prevMention := botMention
+	botMention = testBotMention
+	defer func() { botMention = prevMention }()
+
+	text := "😀 " + testBotMention + " explain me this"
+	mentionOffset := len(utf16.Encode([]rune("😀 ")))
+	mentionLength := len(utf16.Encode([]rune(testBotMention)))
+	update := &models.Update{
+		Message: &models.Message{
+			Text: text,
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: mentionOffset, Length: mentionLength},
+			},
+		},
+	}
+	if !shouldHandleExplainMention(update) {
+		t.Fatal("expected explain matcher to pass with UTF-16 offsets")
+	}
 }
 
 func TestPromptContainsQuestionBlock(t *testing.T) {

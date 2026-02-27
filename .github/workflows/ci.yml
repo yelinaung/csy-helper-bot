@@ -86,3 +86,6 @@ jobs:
 
       - name: Run tests
         run: go test -v ./...
+
+      - name: Run fuzz tests
+        run: go test -run=^$ -fuzz=Fuzz -fuzztime=20s ./internal/bot

@@ -70,6 +70,7 @@ test:
   - export GOMODCACHE="$(pwd)/.cache/go-mod"
   script:
   - go test -v ./...
+  - go test -run=^$ -fuzz=Fuzz -fuzztime=20s ./internal/bot
 
 semgrep-sast:
   stage: security

@@ -52,10 +52,12 @@ func TestAllowExplainRequest(t *testing.T) {
 		From: &models.User{ID: 77},
 	}
 
-	if !allowExplainRequest(msg) {
+	allowed, _ := allowExplainRequest(msg)
+	if !allowed {
 		t.Fatal("first request should pass")
 	}
-	if allowExplainRequest(msg) {
+	allowed, _ = allowExplainRequest(msg)
+	if allowed {
 		t.Fatal("second request should be limited")
 	}
 }

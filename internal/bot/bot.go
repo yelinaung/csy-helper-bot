@@ -430,7 +430,17 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	if !allowExplainRequest(update.Message) {
+	allowed, retryAfter := allowExplainRequest(update.Message)
+	if !allowed {
+		var userID int64
+		if update.Message.From != nil {
+			userID = update.Message.From.ID
+		}
+		log.Warn().
+			Int64("chat_id", update.Message.Chat.ID).
+			Int64("user_id", userID).
+			Dur("retry_after", retryAfter).
+			Msg("Explain request rate limited")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -709,7 +719,17 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	if !allowExplainRequest(update.Message) {
+	allowed, retryAfter := allowExplainRequest(update.Message)
+	if !allowed {
+		var userID int64
+		if update.Message.From != nil {
+			userID = update.Message.From.ID
+		}
+		log.Warn().
+			Int64("chat_id", update.Message.Chat.ID).
+			Int64("user_id", userID).
+			Dur("retry_after", retryAfter).
+			Msg("Ask request rate limited")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -749,12 +769,12 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
 }
 
-func allowExplainRequest(message *models.Message) bool {
+func allowExplainRequest(message *models.Message) (bool, time.Duration) {
 	if message == nil {
-		return false
+		return false, 0
 	}
 	if explainLimiter == nil {
-		return true
+		return true, 0
 	}
 
 	var userID int64
@@ -763,8 +783,7 @@ func allowExplainRequest(message *models.Message) bool {
 	}
 
 	key := buildExplainRateKey(message.Chat.ID, userID)
-	allowed, _ := explainLimiter.allow(key, time.Now())
-	return allowed
+	return explainLimiter.allow(key, time.Now())
 }
 
 type StockQuote struct {

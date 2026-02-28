@@ -622,3 +622,12 @@ func TestQuestionSanitized(t *testing.T) {
 		t.Fatalf("expected question truncated to %d, got %d", maxQuestionInputLength, len(match[1]))
 	}
 }
+
+func TestEscapeTelegramMarkdownV2(t *testing.T) {
+	input := "_*[]()~`>#+-=|{}.!\\"
+	got := escapeTelegramMarkdownV2(input)
+	want := "\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!\\\\"
+	if got != want {
+		t.Fatalf("escapeTelegramMarkdownV2() = %q, want %q", got, want)
+	}
+}

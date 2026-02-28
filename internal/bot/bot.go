@@ -488,11 +488,14 @@ func sendOrEditExplainResult(
 	thinkingErr error,
 	text string,
 ) {
+	formatted := escapeTelegramMarkdownV2(text)
+
 	if thinkingErr == nil && thinkingMsg != nil {
 		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
 			MessageID: thinkingMsg.ID,
-			Text:      text,
+			Text:      formatted,
+			ParseMode: models.ParseModeMarkdown,
 		})
 		if editErr == nil {
 			return
@@ -503,12 +506,38 @@ func sendOrEditExplainResult(
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            text,
+		Text:            formatted,
+		ParseMode:       models.ParseModeMarkdown,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
 		},
 	})
+}
+
+func escapeTelegramMarkdownV2(text string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		`_`, `\_`,
+		`*`, `\*`,
+		`[`, `\[`,
+		`]`, `\]`,
+		`(`, `\(`,
+		`)`, `\)`,
+		`~`, `\~`,
+		"`", "\\`",
+		`>`, `\>`,
+		`#`, `\#`,
+		`+`, `\+`,
+		`-`, `\-`,
+		`=`, `\=`,
+		`|`, `\|`,
+		`{`, `\{`,
+		`}`, `\}`,
+		`.`, `\.`,
+		`!`, `\!`,
+	)
+	return replacer.Replace(text)
 }
 
 func extractQuotedText(message *models.Message) string {

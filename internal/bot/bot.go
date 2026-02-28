@@ -37,6 +37,13 @@ const (
 	leetCodeGraphQLURL = "https://leetcode.com/graphql"
 )
 
+var (
+	markdownCodeBlockRE  = regexp.MustCompile("(?s)```(.*?)```")
+	markdownInlineCodeRE = regexp.MustCompile("`([^`\n]+)`")
+	markdownLinkRE       = regexp.MustCompile(`\[(.+?)\]\((https?://[^)\s]+)\)`)
+	markdownBoldRE       = regexp.MustCompile(`\*\*(.+?)\*\*|__(.+?)__`)
+)
+
 func Run() error {
 	_ = godotenv.Load()
 
@@ -495,7 +502,7 @@ func sendOrEditExplainResult(
 			ChatID:    update.Message.Chat.ID,
 			MessageID: thinkingMsg.ID,
 			Text:      formatted,
-			ParseMode: models.ParseModeMarkdownV1,
+			ParseMode: models.ParseModeMarkdown,
 		})
 		if editErr == nil {
 			return
@@ -517,7 +524,7 @@ func sendOrEditExplainResult(
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            formatted,
-		ParseMode:       models.ParseModeMarkdownV1,
+		ParseMode:       models.ParseModeMarkdown,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
@@ -540,32 +547,78 @@ func sendOrEditExplainResult(
 }
 
 func formatTelegramMarkdown(text string) string {
-	boldRE := regexp.MustCompile(`\*\*(.+?)\*\*`)
-	boldTokens := make([]string, 0, 8)
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	tokens := make([]string, 0, 16)
 
-	withTokens := boldRE.ReplaceAllStringFunc(text, func(m string) string {
-		inner := strings.TrimPrefix(strings.TrimSuffix(m, "**"), "**")
-		inner = escapeMarkdownV1(inner)
-		token := fmt.Sprintf("\x00BOLD%d\x00", len(boldTokens))
-		boldTokens = append(boldTokens, "*"+inner+"*")
-		return token
+	addToken := func(value string) string {
+		id := len(tokens)
+		tokens = append(tokens, value)
+		return fmt.Sprintf("TGMARKTOKEN%dX", id)
+	}
+
+	normalized = markdownCodeBlockRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		submatches := markdownCodeBlockRE.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		return addToken("```" + escapeCodeMarkdownV2(submatches[1]) + "```")
 	})
 
-	escaped := escapeMarkdownV1(withTokens)
-	for i, token := range boldTokens {
-		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("\x00BOLD%d\x00", i), token)
+	normalized = markdownInlineCodeRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		submatches := markdownInlineCodeRE.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		return addToken("`" + escapeCodeMarkdownV2(submatches[1]) + "`")
+	})
+
+	normalized = markdownLinkRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		submatches := markdownLinkRE.FindStringSubmatch(match)
+		if len(submatches) < 3 {
+			return match
+		}
+		label := bot.EscapeMarkdownUnescaped(submatches[1])
+		url := escapeLinkURLMarkdownV2(submatches[2])
+		return addToken("[" + label + "](" + url + ")")
+	})
+
+	normalized = markdownBoldRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		submatches := markdownBoldRE.FindStringSubmatch(match)
+		if len(submatches) < 3 {
+			return match
+		}
+
+		inner := strings.TrimSpace(submatches[1])
+		if inner == "" {
+			inner = strings.TrimSpace(submatches[2])
+		}
+		if inner == "" {
+			return match
+		}
+
+		return addToken("*" + bot.EscapeMarkdownUnescaped(inner) + "*")
+	})
+
+	escaped := bot.EscapeMarkdownUnescaped(normalized)
+	for i, token := range tokens {
+		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("TGMARKTOKEN%dX", i), token)
 	}
 
 	return escaped
 }
 
-func escapeMarkdownV1(text string) string {
+func escapeCodeMarkdownV2(text string) string {
 	replacer := strings.NewReplacer(
 		`\\`, `\\\\`,
-		`_`, `\_`,
-		`*`, `\*`,
 		"`", "\\`",
-		`[`, `\[`,
+	)
+	return replacer.Replace(text)
+}
+
+func escapeLinkURLMarkdownV2(text string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\\\\`,
+		`)`, `\)`,
 	)
 	return replacer.Replace(text)
 }

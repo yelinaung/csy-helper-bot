@@ -624,14 +624,20 @@ func TestQuestionSanitized(t *testing.T) {
 }
 
 func TestFormatTelegramMarkdown(t *testing.T) {
-	got := formatTelegramMarkdown("**hello** and raw _underscore_")
+	got := formatTelegramMarkdown("**hello** and __world__ with _italic_ and `x_y`")
 	if !strings.Contains(got, "*hello*") {
 		t.Fatalf("expected bold conversion, got %q", got)
 	}
 	if strings.Contains(got, "**hello**") {
 		t.Fatalf("expected no double-asterisk markdown left, got %q", got)
 	}
-	if !strings.Contains(got, `\_underscore\_`) {
-		t.Fatalf("expected underscore escaped, got %q", got)
+	if !strings.Contains(got, "*world*") {
+		t.Fatalf("expected double-underscore bold conversion, got %q", got)
+	}
+	if !strings.Contains(got, `\_italic\_`) {
+		t.Fatalf("expected plain underscores escaped for MarkdownV2, got %q", got)
+	}
+	if !strings.Contains(got, "`x_y`") {
+		t.Fatalf("expected inline code preserved, got %q", got)
 	}
 }

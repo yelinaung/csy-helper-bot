@@ -122,9 +122,11 @@ func FuzzExplainPromptConstruction(f *testing.F) {
 	f.Fuzz(func(t *testing.T, text string, question string, mm bool) {
 		gen := &fuzzCaptureGenerator{}
 		explainer := &geminiExplainer{generator: gen}
+		sanitizedText := sanitizeForPrompt(text, maxExplainInputLength)
+		sanitizedQuestion := sanitizeForPrompt(question, maxQuestionInputLength)
 
 		_, err := explainer.explainWithLanguage(context.Background(), text, question, mm)
-		if strings.TrimSpace(text) == "" && strings.TrimSpace(question) == "" {
+		if sanitizedText == "" && sanitizedQuestion == "" {
 			if err == nil {
 				t.Fatal("expected error when both text and question are empty")
 			}
@@ -146,10 +148,10 @@ func FuzzExplainPromptConstruction(f *testing.F) {
 				t.Fatalf("missing close tag %q", closeTag)
 			}
 		}
-		if strings.TrimSpace(question) != "" && !strings.Contains(prompt, "user_question_") {
+		if sanitizedQuestion != "" && !strings.Contains(prompt, "user_question_") {
 			t.Fatal("expected question block for non-empty question")
 		}
-		if strings.TrimSpace(question) == "" && strings.TrimSpace(text) != "" &&
+		if sanitizedQuestion == "" && sanitizedText != "" &&
 			!strings.Contains(prompt, "Only explain the text above") {
 			t.Fatal("expected explain reminder for text-only mode")
 		}

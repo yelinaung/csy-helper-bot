@@ -623,11 +623,15 @@ func TestQuestionSanitized(t *testing.T) {
 	}
 }
 
-func TestEscapeTelegramMarkdownV2(t *testing.T) {
-	input := "_*[]()~`>#+-=|{}.!\\"
-	got := escapeTelegramMarkdownV2(input)
-	want := "\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!\\\\"
-	if got != want {
-		t.Fatalf("escapeTelegramMarkdownV2() = %q, want %q", got, want)
+func TestFormatTelegramMarkdown(t *testing.T) {
+	got := formatTelegramMarkdown("**hello** and raw _underscore_")
+	if !strings.Contains(got, "*hello*") {
+		t.Fatalf("expected bold conversion, got %q", got)
+	}
+	if strings.Contains(got, "**hello**") {
+		t.Fatalf("expected no double-asterisk markdown left, got %q", got)
+	}
+	if !strings.Contains(got, `\_underscore\_`) {
+		t.Fatalf("expected underscore escaped, got %q", got)
 	}
 }

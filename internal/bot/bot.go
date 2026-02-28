@@ -488,36 +488,36 @@ func sendOrEditExplainResult(
 	thinkingErr error,
 	text string,
 ) {
+	formatted := formatTelegramMarkdown(text)
+
 	if thinkingErr == nil && thinkingMsg != nil {
 		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
 			MessageID: thinkingMsg.ID,
-			Text:      text,
-			ParseMode: models.ParseModeMarkdown,
+			Text:      formatted,
+			ParseMode: models.ParseModeMarkdownV1,
 		})
 		if editErr == nil {
 			return
 		}
 		log.Warn().Err(editErr).Msg("Failed to edit markdown response; trying escaped fallback")
 
-		escaped := escapeTelegramMarkdownV2(text)
 		_, escapedEditErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
 			MessageID: thinkingMsg.ID,
-			Text:      escaped,
-			ParseMode: models.ParseModeMarkdown,
+			Text:      text,
 		})
 		if escapedEditErr == nil {
 			return
 		}
-		log.Warn().Err(escapedEditErr).Msg("Failed to edit escaped markdown response; falling back to send message")
+		log.Warn().Err(escapedEditErr).Msg("Failed to edit plain-text fallback; falling back to send message")
 	}
 
 	_, sendErr := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            text,
-		ParseMode:       models.ParseModeMarkdown,
+		Text:            formatted,
+		ParseMode:       models.ParseModeMarkdownV1,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
@@ -528,12 +528,10 @@ func sendOrEditExplainResult(
 	}
 
 	log.Warn().Err(sendErr).Msg("Failed to send markdown response; trying escaped fallback")
-	escaped := escapeTelegramMarkdownV2(text)
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            escaped,
-		ParseMode:       models.ParseModeMarkdown,
+		Text:            text,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
@@ -541,27 +539,33 @@ func sendOrEditExplainResult(
 	})
 }
 
-func escapeTelegramMarkdownV2(text string) string {
+func formatTelegramMarkdown(text string) string {
+	boldRE := regexp.MustCompile(`\*\*(.+?)\*\*`)
+	boldTokens := make([]string, 0, 8)
+
+	withTokens := boldRE.ReplaceAllStringFunc(text, func(m string) string {
+		inner := strings.TrimPrefix(strings.TrimSuffix(m, "**"), "**")
+		inner = escapeMarkdownV1(inner)
+		token := fmt.Sprintf("\x00BOLD%d\x00", len(boldTokens))
+		boldTokens = append(boldTokens, "*"+inner+"*")
+		return token
+	})
+
+	escaped := escapeMarkdownV1(withTokens)
+	for i, token := range boldTokens {
+		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("\x00BOLD%d\x00", i), token)
+	}
+
+	return escaped
+}
+
+func escapeMarkdownV1(text string) string {
 	replacer := strings.NewReplacer(
-		"\\", "\\\\",
+		`\\`, `\\\\`,
 		`_`, `\_`,
 		`*`, `\*`,
-		`[`, `\[`,
-		`]`, `\]`,
-		`(`, `\(`,
-		`)`, `\)`,
-		`~`, `\~`,
 		"`", "\\`",
-		`>`, `\>`,
-		`#`, `\#`,
-		`+`, `\+`,
-		`-`, `\-`,
-		`=`, `\=`,
-		`|`, `\|`,
-		`{`, `\{`,
-		`}`, `\}`,
-		`.`, `\.`,
-		`!`, `\!`,
+		`[`, `\[`,
 	)
 	return replacer.Replace(text)
 }

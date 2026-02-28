@@ -488,25 +488,51 @@ func sendOrEditExplainResult(
 	thinkingErr error,
 	text string,
 ) {
-	formatted := escapeTelegramMarkdownV2(text)
-
 	if thinkingErr == nil && thinkingMsg != nil {
 		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
 			MessageID: thinkingMsg.ID,
-			Text:      formatted,
+			Text:      text,
 			ParseMode: models.ParseModeMarkdown,
 		})
 		if editErr == nil {
 			return
 		}
-		log.Warn().Err(editErr).Msg("Failed to edit thinking message; falling back to send message")
+		log.Warn().Err(editErr).Msg("Failed to edit markdown response; trying escaped fallback")
+
+		escaped := escapeTelegramMarkdownV2(text)
+		_, escapedEditErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    update.Message.Chat.ID,
+			MessageID: thinkingMsg.ID,
+			Text:      escaped,
+			ParseMode: models.ParseModeMarkdown,
+		})
+		if escapedEditErr == nil {
+			return
+		}
+		log.Warn().Err(escapedEditErr).Msg("Failed to edit escaped markdown response; falling back to send message")
 	}
 
+	_, sendErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            text,
+		ParseMode:       models.ParseModeMarkdown,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if sendErr == nil {
+		return
+	}
+
+	log.Warn().Err(sendErr).Msg("Failed to send markdown response; trying escaped fallback")
+	escaped := escapeTelegramMarkdownV2(text)
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            formatted,
+		Text:            escaped,
 		ParseMode:       models.ParseModeMarkdown,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,

@@ -376,6 +376,17 @@ func TestShouldHandleAskMention(t *testing.T) {
 		}
 	})
 
+	t.Run("matches pasted mention text without entities", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " can you explain this and that",
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for pasted mention text")
+		}
+	})
+
 	t.Run("does not match explain message", func(t *testing.T) {
 		update := &models.Update{
 			Message: &models.Message{
@@ -460,6 +471,14 @@ func TestExtractAskQuestion(t *testing.T) {
 		}
 	})
 
+	t.Run("extracts question from pasted mention text without entities", func(t *testing.T) {
+		msg := &models.Message{Text: testBotMention + " can you explain this and that"}
+		got := extractAskQuestion(msg)
+		if got != "can you explain this and that" {
+			t.Fatalf("expected %q, got %q", "can you explain this and that", got)
+		}
+	})
+
 	t.Run("extracts from first mention with question text", func(t *testing.T) {
 		text := "hey " + testBotMention + " hello " + testBotMention + " what is a goroutine?"
 		msg := &models.Message{
@@ -532,6 +551,22 @@ func TestShouldHandleExplainMention_UTF16Offsets(t *testing.T) {
 	}
 	if !shouldHandleExplainMention(update) {
 		t.Fatal("expected explain matcher to pass with UTF-16 offsets")
+	}
+}
+
+func TestShouldHandleExplainMention_PastedMentionText(t *testing.T) {
+	prevMention := botMention
+	botMention = testBotMention
+	defer func() { botMention = prevMention }()
+
+	update := &models.Update{
+		Message: &models.Message{
+			Text: testBotMention + " explain me this",
+		},
+	}
+
+	if !shouldHandleExplainMention(update) {
+		t.Fatal("expected explain matcher to pass for pasted mention text")
 	}
 }
 

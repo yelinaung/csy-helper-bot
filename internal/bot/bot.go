@@ -735,20 +735,8 @@ func shouldHandleExplainMention(update *models.Update) bool {
 		return false
 	}
 
-	for _, entity := range update.Message.Entities {
-		if entity.Type != models.MessageEntityTypeMention {
-			continue
-		}
-		mention, _, ok := mentionAndSuffixAtEntity(update.Message.Text, &entity)
-		if !ok {
-			continue
-		}
-		if strings.EqualFold(mention, botMention) {
-			return true
-		}
-	}
-
-	return false
+	mention, _, ok := extractMentionAndSuffix(update.Message)
+	return ok && strings.EqualFold(mention, botMention)
 }
 
 func shouldHandleAskMention(update *models.Update) bool {
@@ -759,35 +747,27 @@ func shouldHandleAskMention(update *models.Update) bool {
 		return false
 	}
 
-	messageText := update.Message.Text
-	if strings.TrimSpace(messageText) == "" {
+	if strings.TrimSpace(update.Message.Text) == "" {
 		return false
 	}
 
-	for _, entity := range update.Message.Entities {
-		if entity.Type != models.MessageEntityTypeMention {
-			continue
-		}
-		mention, suffix, ok := mentionAndSuffixAtEntity(messageText, &entity)
-		if !ok || !strings.EqualFold(mention, botMention) {
-			continue
-		}
-
-		after := strings.TrimSpace(suffix)
-		if after == "" {
-			continue
-		}
-		afterLower := strings.ToLower(after)
-		if isExplainCommand(afterLower) {
-			continue
-		}
-		if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
-			return true
-		}
-		return true
+	mention, suffix, ok := extractMentionAndSuffix(update.Message)
+	if !ok || !strings.EqualFold(mention, botMention) {
+		return false
 	}
 
-	return false
+	after := strings.TrimSpace(suffix)
+	if after == "" {
+		return false
+	}
+	afterLower := strings.ToLower(after)
+	if isExplainCommand(afterLower) {
+		return false
+	}
+	if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
+		return true
+	}
+	return true
 }
 
 func extractAskQuestion(message *models.Message) string {
@@ -795,34 +775,27 @@ func extractAskQuestion(message *models.Message) string {
 		return ""
 	}
 
-	text := message.Text
-	for _, entity := range message.Entities {
-		if entity.Type != models.MessageEntityTypeMention {
-			continue
-		}
-		mention, suffix, ok := mentionAndSuffixAtEntity(text, &entity)
-		if !ok || !strings.EqualFold(mention, botMention) {
-			continue
-		}
-
-		after := strings.TrimSpace(suffix)
-		if after == "" {
-			continue
-		}
-		afterLower := strings.ToLower(after)
-		if isExplainCommand(afterLower) {
-			continue
-		}
-		if afterLower == "ask" {
-			return ""
-		}
-		if strings.HasPrefix(afterLower, "ask ") {
-			return strings.TrimSpace(after[len("ask "):])
-		}
-		return after
+	mention, suffix, ok := extractMentionAndSuffix(message)
+	if !ok || !strings.EqualFold(mention, botMention) {
+		return ""
 	}
 
-	return ""
+	after := strings.TrimSpace(suffix)
+	if after == "" {
+		return ""
+	}
+	afterLower := strings.ToLower(after)
+	if isExplainCommand(afterLower) {
+		return ""
+	}
+	if afterLower == "ask" {
+		return ""
+	}
+	if strings.HasPrefix(afterLower, "ask ") {
+		return strings.TrimSpace(after[len("ask "):])
+	}
+
+	return after
 }
 
 func isExplainCommand(text string) bool {
@@ -842,6 +815,67 @@ func mentionAndSuffixAtEntity(text string, entity *models.MessageEntity) (mentio
 		return "", "", false
 	}
 	return text[start:end], text[end:], true
+}
+
+func extractMentionAndSuffix(message *models.Message) (mention string, suffix string, ok bool) {
+	if message == nil || botMention == "" {
+		return "", "", false
+	}
+
+	text := message.Text
+	for _, entity := range message.Entities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		mention, suffix, ok := mentionAndSuffixAtEntity(text, &entity)
+		if ok && strings.EqualFold(mention, botMention) {
+			return mention, suffix, true
+		}
+	}
+
+	return mentionAndSuffixFromText(text, botMention)
+}
+
+func mentionAndSuffixFromText(text, targetMention string) (mention string, suffix string, ok bool) {
+	if strings.TrimSpace(text) == "" || targetMention == "" {
+		return "", "", false
+	}
+
+	lowerText := strings.ToLower(text)
+	lowerMention := strings.ToLower(targetMention)
+	searchFrom := 0
+
+	for searchFrom < len(lowerText) {
+		idx := strings.Index(lowerText[searchFrom:], lowerMention)
+		if idx == -1 {
+			return "", "", false
+		}
+		start := searchFrom + idx
+		end := start + len(lowerMention)
+		if hasMentionBoundaries(text, start, end) {
+			return text[start:end], text[end:], true
+		}
+		searchFrom = end
+	}
+
+	return "", "", false
+}
+
+func hasMentionBoundaries(text string, start, end int) bool {
+	if start < 0 || end > len(text) || start >= end {
+		return false
+	}
+	if start > 0 && isTelegramUsernameChar(text[start-1]) {
+		return false
+	}
+	if end < len(text) && isTelegramUsernameChar(text[end]) {
+		return false
+	}
+	return true
+}
+
+func isTelegramUsernameChar(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func utf16EntityRangeToByteRange(text string, offset, length int) (start int, end int, ok bool) {

@@ -58,7 +58,10 @@ func Run() error {
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
 			logIncomingUpdate(update, false)
-			enforceChatAccess(ctx, b, update)
+			if !enforceChatAccess(ctx, b, update) {
+				return
+			}
+			logUnmatchedMessage(update)
 		}),
 	}
 
@@ -307,6 +310,40 @@ func logIncomingUpdate(update *models.Update, matched bool) {
 	event.Msg("Incoming telegram update")
 }
 
+func logUnmatchedMessage(update *models.Update) {
+	if update == nil || update.Message == nil {
+		return
+	}
+
+	msg := update.Message
+	hasBotMentionText := botMention != "" && strings.Contains(strings.ToLower(msg.Text), strings.ToLower(botMention))
+	hasMentionEntity := false
+
+	for _, entity := range msg.Entities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		mention, _, ok := mentionAndSuffixAtEntity(msg.Text, &entity)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(mention, botMention) {
+			hasMentionEntity = true
+			break
+		}
+	}
+
+	log.Debug().
+		Int64("chat_id", msg.Chat.ID).
+		Str("chat_type", string(msg.Chat.Type)).
+		Int("text_len", len(msg.Text)).
+		Int("entity_count", len(msg.Entities)).
+		Bool("has_bot_mention_text", hasBotMentionText).
+		Bool("has_bot_mention_entity", hasMentionEntity).
+		Bool("is_reply", msg.ReplyToMessage != nil).
+		Msg("Unmatched incoming message")
+}
+
 func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -469,6 +506,12 @@ func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			AllowSendingWithoutReply: true,
 		},
 	})
+	if thinkingErr != nil {
+		log.Warn().
+			Err(thinkingErr).
+			Int64("chat_id", update.Message.Chat.ID).
+			Msg("Failed to send thinking message for explain request")
+	}
 
 	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText)
 	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, "", respondInBurmese)
@@ -507,7 +550,11 @@ func sendOrEditExplainResult(
 		if editErr == nil {
 			return
 		}
-		log.Warn().Err(editErr).Msg("Failed to edit markdown response; trying escaped fallback")
+		log.Warn().
+			Err(editErr).
+			Int64("chat_id", update.Message.Chat.ID).
+			Int("message_id", thinkingMsg.ID).
+			Msg("Failed to edit markdown response; trying escaped fallback")
 
 		_, escapedEditErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
@@ -517,7 +564,11 @@ func sendOrEditExplainResult(
 		if escapedEditErr == nil {
 			return
 		}
-		log.Warn().Err(escapedEditErr).Msg("Failed to edit plain-text fallback; falling back to send message")
+		log.Warn().
+			Err(escapedEditErr).
+			Int64("chat_id", update.Message.Chat.ID).
+			Int("message_id", thinkingMsg.ID).
+			Msg("Failed to edit plain-text fallback; falling back to send message")
 	}
 
 	_, sendErr := b.SendMessage(ctx, &bot.SendMessageParams{
@@ -534,7 +585,10 @@ func sendOrEditExplainResult(
 		return
 	}
 
-	log.Warn().Err(sendErr).Msg("Failed to send markdown response; trying escaped fallback")
+	log.Warn().
+		Err(sendErr).
+		Int64("chat_id", update.Message.Chat.ID).
+		Msg("Failed to send markdown response; trying escaped fallback")
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
@@ -886,6 +940,12 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			AllowSendingWithoutReply: true,
 		},
 	})
+	if thinkingErr != nil {
+		log.Warn().
+			Err(thinkingErr).
+			Int64("chat_id", update.Message.Chat.ID).
+			Msg("Failed to send thinking message for ask request")
+	}
 
 	respondInBurmese := shouldRespondInBurmese(update.Message.Text)
 	explanation, err := textExplainer.explainWithLanguage(ctx, "", question, respondInBurmese)

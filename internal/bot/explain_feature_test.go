@@ -311,10 +311,10 @@ func TestShouldHandleAskMention(t *testing.T) {
 	botMention = testBotMention
 	defer func() { botMention = prevMention }()
 
-	t.Run("matches when mention and ask are present", func(t *testing.T) {
+	t.Run("matches when mention and text are present", func(t *testing.T) {
 		update := &models.Update{
 			Message: &models.Message{
-				Text: testBotMention + " ask what is a mutex?",
+				Text: testBotMention + " what is a mutex?",
 				Entities: []models.MessageEntity{
 					{
 						Type:   models.MessageEntityTypeMention,
@@ -347,21 +347,10 @@ func TestShouldHandleAskMention(t *testing.T) {
 		}
 	})
 
-	t.Run("does not match without mention entity", func(t *testing.T) {
+	t.Run("matches when mention and ask-free question are present", func(t *testing.T) {
 		update := &models.Update{
 			Message: &models.Message{
-				Text: "ask what is a mutex?",
-			},
-		}
-		if shouldHandleAskMention(update) {
-			t.Fatal("expected matcher to fail without mention")
-		}
-	})
-
-	t.Run("does not match ask prefix in other words", func(t *testing.T) {
-		update := &models.Update{
-			Message: &models.Message{
-				Text: testBotMention + " asking why",
+				Text: testBotMention + " why is this slow?",
 				Entities: []models.MessageEntity{
 					{
 						Type:   models.MessageEntityTypeMention,
@@ -371,8 +360,19 @@ func TestShouldHandleAskMention(t *testing.T) {
 				},
 			},
 		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass")
+		}
+	})
+
+	t.Run("does not match without mention entity", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: "ask what is a mutex?",
+			},
+		}
 		if shouldHandleAskMention(update) {
-			t.Fatal("expected matcher to fail for 'asking'")
+			t.Fatal("expected matcher to fail without mention")
 		}
 	})
 
@@ -400,7 +400,20 @@ func TestExtractAskQuestion(t *testing.T) {
 	botMention = testBotMention
 	defer func() { botMention = prevMention }()
 
-	t.Run("extracts question after ask", func(t *testing.T) {
+	t.Run("extracts question without ask prefix", func(t *testing.T) {
+		msg := &models.Message{
+			Text: testBotMention + " what is a mutex?",
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeMention, Offset: 0, Length: len(testBotMention)},
+			},
+		}
+		got := extractAskQuestion(msg)
+		if got != "what is a mutex?" {
+			t.Fatalf("expected %q, got %q", "what is a mutex?", got)
+		}
+	})
+
+	t.Run("extracts question after ask for backwards compatibility", func(t *testing.T) {
 		msg := &models.Message{
 			Text: testBotMention + " ask what is a mutex?",
 			Entities: []models.MessageEntity{
@@ -426,7 +439,7 @@ func TestExtractAskQuestion(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty for ask-prefixed word", func(t *testing.T) {
+	t.Run("extracts question for ask-prefixed word", func(t *testing.T) {
 		msg := &models.Message{
 			Text: testBotMention + " asking why",
 			Entities: []models.MessageEntity{
@@ -434,8 +447,8 @@ func TestExtractAskQuestion(t *testing.T) {
 			},
 		}
 		got := extractAskQuestion(msg)
-		if got != "" {
-			t.Fatalf("expected empty, got %q", got)
+		if got != "asking why" {
+			t.Fatalf("expected %q, got %q", "asking why", got)
 		}
 	})
 
@@ -447,8 +460,8 @@ func TestExtractAskQuestion(t *testing.T) {
 		}
 	})
 
-	t.Run("extracts from second mention when first is not ask", func(t *testing.T) {
-		text := "hey " + testBotMention + " hello " + testBotMention + " ask what is a goroutine?"
+	t.Run("extracts from first mention with question text", func(t *testing.T) {
+		text := "hey " + testBotMention + " hello " + testBotMention + " what is a goroutine?"
 		msg := &models.Message{
 			Text: text,
 			Entities: []models.MessageEntity{
@@ -457,13 +470,13 @@ func TestExtractAskQuestion(t *testing.T) {
 			},
 		}
 		got := extractAskQuestion(msg)
-		if got != "what is a goroutine?" {
-			t.Fatalf("expected %q, got %q", "what is a goroutine?", got)
+		if got != "hello "+testBotMention+" what is a goroutine?" {
+			t.Fatalf("expected %q, got %q", "hello "+testBotMention+" what is a goroutine?", got)
 		}
 	})
 
 	t.Run("extracts question with UTF-16 mention offsets", func(t *testing.T) {
-		text := "😀 " + testBotMention + " ask why so slow?"
+		text := "😀 " + testBotMention + " why so slow?"
 		mentionOffset := len(utf16.Encode([]rune("😀 ")))
 		mentionLength := len(utf16.Encode([]rune(testBotMention)))
 
@@ -485,7 +498,7 @@ func TestShouldHandleAskMention_UTF16Offsets(t *testing.T) {
 	botMention = testBotMention
 	defer func() { botMention = prevMention }()
 
-	text := "😀 " + testBotMention + " ask what happened?"
+	text := "😀 " + testBotMention + " what happened?"
 	mentionOffset := len(utf16.Encode([]rune("😀 ")))
 	mentionLength := len(utf16.Encode([]rune(testBotMention)))
 	update := &models.Update{

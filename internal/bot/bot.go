@@ -322,7 +322,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
 Mention + "explain me this" - Explain the replied message (e.g., @%s explain me this)
-Mention + "ask" - Ask a question (e.g., @%s ask what is a mutex?)`, strings.TrimPrefix(botMention, "@"), strings.TrimPrefix(botMention, "@"))
+Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"), strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -719,10 +719,18 @@ func shouldHandleAskMention(update *models.Update) bool {
 			continue
 		}
 
-		afterLower := strings.ToLower(strings.TrimSpace(suffix))
+		after := strings.TrimSpace(suffix)
+		if after == "" {
+			continue
+		}
+		afterLower := strings.ToLower(after)
+		if isExplainCommand(afterLower) {
+			continue
+		}
 		if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
 			return true
 		}
+		return true
 	}
 
 	return false
@@ -744,16 +752,31 @@ func extractAskQuestion(message *models.Message) string {
 		}
 
 		after := strings.TrimSpace(suffix)
+		if after == "" {
+			continue
+		}
 		afterLower := strings.ToLower(after)
+		if isExplainCommand(afterLower) {
+			continue
+		}
 		if afterLower == "ask" {
 			return ""
 		}
 		if strings.HasPrefix(afterLower, "ask ") {
 			return strings.TrimSpace(after[len("ask "):])
 		}
+		return after
 	}
 
 	return ""
+}
+
+func isExplainCommand(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "explain me this" {
+		return true
+	}
+	return strings.HasPrefix(trimmed, "explain me this ")
 }
 
 func mentionAndSuffixAtEntity(text string, entity *models.MessageEntity) (mention string, suffix string, ok bool) {
@@ -826,7 +849,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf(`Send "%s ask your question here".`, botMention),
+			Text:            fmt.Sprintf(`Send "%s your question here".`, botMention),
 		})
 		return
 	}

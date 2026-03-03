@@ -13,7 +13,7 @@ A Telegram bot that provides helpful utilities for developers.
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
 - `@<bot_username> explain me this` (as a reply) - Explains the replied message using Gemini
-- `@<bot_username> ask <question>` - Asks a direct question without quoting a message
+- `@<bot_username> <question>` - Asks a direct question without quoting a message
 - Burmese-aware answers:
   - If requester text or quoted text contains Burmese, answer in Burmese
 - Tone/persona variation:
@@ -50,7 +50,7 @@ A Telegram bot that provides helpful utilities for developers.
   - Reply to a message in an allowed group and send:
     - `@<bot_username> explain me this`
 - Ask directly:
-  - `@<bot_username> ask what does mutex mean?`
+  - `@<bot_username> what does mutex mean?`
 
 ## Access Control
 

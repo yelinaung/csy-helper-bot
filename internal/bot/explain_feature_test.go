@@ -117,41 +117,6 @@ func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 	}
 }
 
-func TestShouldHandleExplainMention(t *testing.T) {
-	prevMention := botMention
-	botMention = testBotMention
-	defer func() { botMention = prevMention }()
-
-	t.Run("matches when mention and phrase are present", func(t *testing.T) {
-		update := &models.Update{
-			Message: &models.Message{
-				Text: testBotMention + " explain me this",
-				Entities: []models.MessageEntity{
-					{
-						Type:   models.MessageEntityTypeMention,
-						Offset: 0,
-						Length: len(testBotMention),
-					},
-				},
-			},
-		}
-		if !shouldHandleExplainMention(update) {
-			t.Fatal("expected matcher to pass")
-		}
-	})
-
-	t.Run("does not match without mention", func(t *testing.T) {
-		update := &models.Update{
-			Message: &models.Message{
-				Text: "explain me this",
-			},
-		}
-		if shouldHandleExplainMention(update) {
-			t.Fatal("expected matcher to fail")
-		}
-	})
-}
-
 func TestShouldRespondInBurmese(t *testing.T) {
 	if shouldRespondInBurmese("မင်္ဂလာပါ "+testBotMention+" explain me this") != true {
 		t.Fatal("expected Burmese request to be detected")
@@ -387,7 +352,7 @@ func TestShouldHandleAskMention(t *testing.T) {
 		}
 	})
 
-	t.Run("does not match explain message", func(t *testing.T) {
+	t.Run("matches explain phrase as normal ask question", func(t *testing.T) {
 		update := &models.Update{
 			Message: &models.Message{
 				Text: testBotMention + " explain me this",
@@ -400,8 +365,29 @@ func TestShouldHandleAskMention(t *testing.T) {
 				},
 			},
 		}
-		if shouldHandleAskMention(update) {
-			t.Fatal("expected matcher to fail for explain message")
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for explain phrase")
+		}
+	})
+
+	t.Run("matches when quoted message is present", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention + " can you explain this and that",
+				ReplyToMessage: &models.Message{
+					Text: "quoted content",
+				},
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for quoted message")
 		}
 	})
 }
@@ -533,43 +519,6 @@ func TestShouldHandleAskMention_UTF16Offsets(t *testing.T) {
 	}
 }
 
-func TestShouldHandleExplainMention_UTF16Offsets(t *testing.T) {
-	prevMention := botMention
-	botMention = testBotMention
-	defer func() { botMention = prevMention }()
-
-	text := "😀 " + testBotMention + " explain me this"
-	mentionOffset := len(utf16.Encode([]rune("😀 ")))
-	mentionLength := len(utf16.Encode([]rune(testBotMention)))
-	update := &models.Update{
-		Message: &models.Message{
-			Text: text,
-			Entities: []models.MessageEntity{
-				{Type: models.MessageEntityTypeMention, Offset: mentionOffset, Length: mentionLength},
-			},
-		},
-	}
-	if !shouldHandleExplainMention(update) {
-		t.Fatal("expected explain matcher to pass with UTF-16 offsets")
-	}
-}
-
-func TestShouldHandleExplainMention_PastedMentionText(t *testing.T) {
-	prevMention := botMention
-	botMention = testBotMention
-	defer func() { botMention = prevMention }()
-
-	update := &models.Update{
-		Message: &models.Message{
-			Text: testBotMention + " explain me this",
-		},
-	}
-
-	if !shouldHandleExplainMention(update) {
-		t.Fatal("expected explain matcher to pass for pasted mention text")
-	}
-}
-
 func TestPromptContainsQuestionBlock(t *testing.T) {
 	gen := &capturingGenerator{}
 	explainer := &geminiExplainer{generator: gen}
@@ -672,7 +621,7 @@ func TestQuestionSanitized(t *testing.T) {
 }
 
 func TestFormatTelegramMarkdown(t *testing.T) {
-	got := formatTelegramMarkdown("**hello** and __world__ with _italic_ and `x_y`")
+	got := formatTelegramMarkdown("**hello** and __world__ with _italic_ and `x_y` and *crushes*")
 	if !strings.Contains(got, "*hello*") {
 		t.Fatalf("expected bold conversion, got %q", got)
 	}
@@ -687,5 +636,8 @@ func TestFormatTelegramMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(got, "`x_y`") {
 		t.Fatalf("expected inline code preserved, got %q", got)
+	}
+	if !strings.Contains(got, `\*crushes\*`) {
+		t.Fatalf("expected single-asterisk text to be escaped, got %q", got)
 	}
 }

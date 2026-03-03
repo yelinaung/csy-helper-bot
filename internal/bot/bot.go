@@ -86,7 +86,6 @@ func Run() error {
 	}
 	botUserID = me.ID
 	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, requestLoggingMiddleware)
-	b.RegisterHandlerMatchFunc(shouldHandleExplainMention, explainHandler, requestLoggingMiddleware)
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
 	if err != nil {
@@ -358,8 +357,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
-Mention + "explain me this" - Explain the replied message (e.g., @%s explain me this)
-Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"), strings.TrimPrefix(botMention, "@"))
+Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
@@ -439,95 +437,6 @@ func initGeminiExplainer() (*geminiExplainer, error) {
 	}
 
 	return newGeminiExplainer(context.Background(), apiKey)
-}
-
-func explainHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if textExplainer == nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            "Explain feature is not configured. Please set GEMINI_API_KEY.",
-		})
-		return
-	}
-
-	quotedText := extractQuotedText(update.Message)
-
-	if quotedText == "" {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf(`Reply to a text message and send "%s explain me this".`, botMention),
-		})
-		return
-	}
-	if quotedText != "" && isQuotedFromBot(update.Message) {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            "I can only explain messages from other users.",
-			ReplyParameters: &models.ReplyParameters{
-				MessageID:                update.Message.ID,
-				AllowSendingWithoutReply: true,
-			},
-		})
-		return
-	}
-
-	allowed, retryAfter := allowExplainRequest(update.Message)
-	if !allowed {
-		var userID int64
-		if update.Message.From != nil {
-			userID = update.Message.From.ID
-		}
-		log.Warn().
-			Int64("chat_id", update.Message.Chat.ID).
-			Int64("user_id", userID).
-			Dur("retry_after", retryAfter).
-			Msg("Explain request rate limited")
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            "Rate limit reached for explain requests. Please try again shortly.",
-			ReplyParameters: &models.ReplyParameters{
-				MessageID:                update.Message.ID,
-				AllowSendingWithoutReply: true,
-			},
-		})
-		return
-	}
-
-	thinkingMsg, thinkingErr := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          update.Message.Chat.ID,
-		MessageThreadID: update.Message.MessageThreadID,
-		Text:            "thinking...",
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                update.Message.ID,
-			AllowSendingWithoutReply: true,
-		},
-	})
-	if thinkingErr != nil {
-		log.Warn().
-			Err(thinkingErr).
-			Int64("chat_id", update.Message.Chat.ID).
-			Msg("Failed to send thinking message for explain request")
-	}
-
-	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quotedText)
-	explanation, err := textExplainer.explainWithLanguage(ctx, quotedText, "", respondInBurmese)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to explain quoted message")
-
-		errText := "Failed to explain this message. Please try again later."
-		if errors.Is(err, ErrExplainTimeout) {
-			errText = "Explanation timed out. Please try again."
-		}
-
-		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
-		return
-	}
-
-	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
 }
 
 func sendOrEditExplainResult(
@@ -722,23 +631,6 @@ func shouldRespondInBurmese(texts ...string) bool {
 	return false
 }
 
-func shouldHandleExplainMention(update *models.Update) bool {
-	if update == nil || update.Message == nil {
-		return false
-	}
-	if botMention == "" {
-		return false
-	}
-
-	text := strings.ToLower(strings.TrimSpace(update.Message.Text))
-	if text == "" || !strings.Contains(text, "explain me this") {
-		return false
-	}
-
-	mention, _, ok := extractMentionAndSuffix(update.Message)
-	return ok && strings.EqualFold(mention, botMention)
-}
-
 func shouldHandleAskMention(update *models.Update) bool {
 	if update == nil || update.Message == nil {
 		return false
@@ -750,7 +642,6 @@ func shouldHandleAskMention(update *models.Update) bool {
 	if strings.TrimSpace(update.Message.Text) == "" {
 		return false
 	}
-
 	mention, suffix, ok := extractMentionAndSuffix(update.Message)
 	if !ok || !strings.EqualFold(mention, botMention) {
 		return false
@@ -761,9 +652,6 @@ func shouldHandleAskMention(update *models.Update) bool {
 		return false
 	}
 	afterLower := strings.ToLower(after)
-	if isExplainCommand(afterLower) {
-		return false
-	}
 	if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
 		return true
 	}
@@ -785,9 +673,6 @@ func extractAskQuestion(message *models.Message) string {
 		return ""
 	}
 	afterLower := strings.ToLower(after)
-	if isExplainCommand(afterLower) {
-		return ""
-	}
 	if afterLower == "ask" {
 		return ""
 	}
@@ -796,14 +681,6 @@ func extractAskQuestion(message *models.Message) string {
 	}
 
 	return after
-}
-
-func isExplainCommand(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "explain me this" {
-		return true
-	}
-	return strings.HasPrefix(trimmed, "explain me this ")
 }
 
 func mentionAndSuffixAtEntity(text string, entity *models.MessageEntity) (mention string, suffix string, ok bool) {

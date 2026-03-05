@@ -918,9 +918,7 @@ type CompanyProfile struct {
 	Exchange             string  `json:"exchange"`
 }
 
-var blockedStocks = map[string]string{
-	"TEAM": "Please.. no.. don't .. oh god why",
-}
+var blockedStocks = map[string]string{}
 
 func blockedStockResponse(symbol string) (string, bool) {
 	msg, ok := blockedStocks[symbol]

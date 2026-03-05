@@ -365,16 +365,25 @@ func TestFetchCompanyProfile(t *testing.T) {
 }
 
 func TestBlockedStockResponse(t *testing.T) {
+	orig := blockedStocks
+	defer func() { blockedStocks = orig }()
+
+	blockedStocks = map[string]string{
+		"TEAM": "Please.. no.. don't .. oh god why",
+		"SCAM": "nope",
+	}
+
 	tests := []struct {
 		name        string
 		symbol      string
 		wantBlocked bool
 		wantMsg     string
 	}{
-		{"TEAM is blocked", "TEAM", true, "Please.. no.. don't .. oh god why"},
-		{"AAPL is not blocked", "AAPL", false, ""},
-		{"team lowercase not blocked", "team", false, ""},
-		{"empty symbol not blocked", "", false, ""},
+		{"blocked symbol returns message", "TEAM", true, "Please.. no.. don't .. oh god why"},
+		{"another blocked symbol", "SCAM", true, "nope"},
+		{"unblocked symbol", "AAPL", false, ""},
+		{"lowercase not matched", "team", false, ""},
+		{"empty symbol", "", false, ""},
 	}
 
 	for _, tt := range tests {
@@ -387,6 +396,21 @@ func TestBlockedStockResponse(t *testing.T) {
 				t.Errorf("blockedStockResponse(%q) msg = %q, want %q", tt.symbol, msg, tt.wantMsg)
 			}
 		})
+	}
+}
+
+func TestBlockedStockResponse_EmptyMap(t *testing.T) {
+	orig := blockedStocks
+	defer func() { blockedStocks = orig }()
+
+	blockedStocks = map[string]string{}
+
+	msg, blocked := blockedStockResponse("TEAM")
+	if blocked {
+		t.Errorf("expected TEAM to not be blocked when map is empty")
+	}
+	if msg != "" {
+		t.Errorf("expected empty message, got %q", msg)
 	}
 }
 

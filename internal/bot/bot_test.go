@@ -364,6 +364,32 @@ func TestFetchCompanyProfile(t *testing.T) {
 	}
 }
 
+func TestBlockedStockResponse(t *testing.T) {
+	tests := []struct {
+		name        string
+		symbol      string
+		wantBlocked bool
+		wantMsg     string
+	}{
+		{"TEAM is blocked", "TEAM", true, "Please.. no.. don't .. oh god why"},
+		{"AAPL is not blocked", "AAPL", false, ""},
+		{"team lowercase not blocked", "team", false, ""},
+		{"empty symbol not blocked", "", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, blocked := blockedStockResponse(tt.symbol)
+			if blocked != tt.wantBlocked {
+				t.Errorf("blockedStockResponse(%q) blocked = %v, want %v", tt.symbol, blocked, tt.wantBlocked)
+			}
+			if msg != tt.wantMsg {
+				t.Errorf("blockedStockResponse(%q) msg = %q, want %q", tt.symbol, msg, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestSymbolValidation(t *testing.T) {
 	tests := []struct {
 		name    string

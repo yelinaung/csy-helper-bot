@@ -407,6 +407,15 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
+	if msg, blocked := blockedStockResponse(symbol); blocked {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            msg,
+		})
+		return
+	}
+
 	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote")
@@ -907,6 +916,15 @@ type CompanyProfile struct {
 	MarketCapitalization float64 `json:"marketCapitalization"` //nolint:tagliatelle // Finnhub response uses camelCase.
 	Industry             string  `json:"finnhubIndustry"`      //nolint:tagliatelle // Finnhub response uses camelCase.
 	Exchange             string  `json:"exchange"`
+}
+
+var blockedStocks = map[string]string{
+	"TEAM": "Please.. no.. don't .. oh god why",
+}
+
+func blockedStockResponse(symbol string) (string, bool) {
+	msg, ok := blockedStocks[symbol]
+	return msg, ok
 }
 
 func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {

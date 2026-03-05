@@ -6,7 +6,7 @@ require (
 	github.com/go-telegram/bot v1.19.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.34.0
-	google.golang.org/genai v1.48.0
+	google.golang.org/genai v1.49.0
 )
 
 require (

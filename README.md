@@ -12,6 +12,7 @@ A Telegram bot that provides helpful utilities for developers.
 
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
+- `!s SYMBOL 7d|30d` - Get historical stock chart image + summary (e.g., `!s AAPL 7d`)
 - `@<bot_username> <question>` - Asks anything with Gemini (works with or without quoting a message)
 - Burmese-aware answers:
   - If requester text or quoted text contains Burmese, answer in Burmese
@@ -28,23 +29,31 @@ A Telegram bot that provides helpful utilities for developers.
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and get your token
 2. Get a free API key from [Finnhub](https://finnhub.io/) for stock prices
-3. Create a `.env` file:
+3. Get a Databento API key from [Databento](https://databento.com/) for historical stock data
+4. Create a `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
+   DATABENTO_API_KEY=your_databento_key_here
+   # optional (defaults to EQUS.MINI)
+   DATABENTO_DATASET=EQUS.MINI
    GEMINI_API_KEY=your_gemini_key_here
    ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
    EXPLAIN_RATE_LIMIT_COUNT=5
    EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
    LOG_LEVEL=info
    ```
-4. Run the bot:
+5. Run the bot:
    ```bash
    go run ./cmd/csy-helper-bot
    ```
 
 ## Usage
 
+- Stock commands:
+  - `!s AAPL` - current quote
+  - `!s AAPL 7d` - 7-day historical chart image
+  - `!s AAPL 30d` - 30-day historical chart image
 - Ask directly:
   - `@<bot_username> what does mutex mean?`
   - `@<bot_username> can you explain this and that?` (while replying to a quoted message)
@@ -65,6 +74,8 @@ docker build -t csy-helper-bot .
 docker run \
   -e TELEGRAM_BOT_TOKEN=your_token \
   -e FINNHUB_API_KEY=your_key \
+  -e DATABENTO_API_KEY=your_databento_key \
+  -e DATABENTO_DATASET=EQUS.MINI \
   -e GEMINI_API_KEY=your_gemini_key \
   -e ALLOWED_GROUP_IDS=-1001234567890 \
   -e LOG_LEVEL=info \
@@ -78,6 +89,8 @@ docker run \
 dokku apps:create csy-helper-bot
 dokku config:set csy-helper-bot TELEGRAM_BOT_TOKEN=your_token
 dokku config:set csy-helper-bot FINNHUB_API_KEY=your_key
+dokku config:set csy-helper-bot DATABENTO_API_KEY=your_databento_key
+dokku config:set csy-helper-bot DATABENTO_DATASET=EQUS.MINI
 dokku config:set csy-helper-bot GEMINI_API_KEY=your_gemini_key
 dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5

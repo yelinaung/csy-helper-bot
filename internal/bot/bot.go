@@ -479,6 +479,10 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
 			Text:            fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days),
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
 		})
 		return
 	}
@@ -491,6 +495,10 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
 			Text:            caption,
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
 		})
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type rewriteHostTransport struct {
@@ -475,6 +476,82 @@ func TestBlockedStockResponse_EmptyMap(t *testing.T) {
 	}
 	if msg != "" {
 		t.Errorf("expected empty message, got %q", msg)
+	}
+}
+
+func TestParseStockCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantSym   string
+		wantDays  int
+		wantError bool
+		errSubstr string
+	}{
+		{name: "spot quote", input: "!s AAPL", wantSym: "AAPL", wantDays: 0},
+		{name: "historical 7d", input: "!s AAPL 7d", wantSym: "AAPL", wantDays: 7},
+		{name: "historical 30d", input: "!s msft 30d", wantSym: "MSFT", wantDays: 30},
+		{name: "missing separator after command", input: "!sAAPL", wantError: true, errSubstr: "invalid usage"},
+		{name: "invalid range", input: "!s AAPL 10d", wantError: true, errSubstr: "invalid range"},
+		{name: "invalid symbol with extra token", input: "!s AA PL", wantError: true, errSubstr: "invalid usage"},
+		{name: "empty", input: "!s", wantError: true, errSubstr: "please provide"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSym, gotDays, err := parseStockCommand(tt.input)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("expected error, got symbol=%q days=%d", gotSym, gotDays)
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Fatalf("expected error containing %q, got %q", tt.errSubstr, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotSym != tt.wantSym || gotDays != tt.wantDays {
+				t.Fatalf("got (%q,%d), want (%q,%d)", gotSym, gotDays, tt.wantSym, tt.wantDays)
+			}
+		})
+	}
+}
+
+func TestRenderHistoricalChartPNG(t *testing.T) {
+	bars := []HistoricalBar{
+		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 100},
+		{Date: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), Close: 101.25},
+		{Date: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Close: 99.75},
+	}
+	buf, err := renderHistoricalChartPNG("AAPL", 7, bars)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(buf) == 0 {
+		t.Fatal("expected non-empty PNG bytes")
+	}
+}
+
+func TestFormatHistoricalSummary(t *testing.T) {
+	bars := []HistoricalBar{
+		{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Close: 100, High: 102, Low: 99},
+		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 110, High: 111, Low: 98},
+	}
+	got := formatHistoricalSummary("AAPL", 7, bars)
+	if !strings.Contains(got, "AAPL 7d") {
+		t.Fatalf("expected symbol and range in summary, got %q", got)
+	}
+	if !strings.Contains(got, "Return: 10.00%") {
+		t.Fatalf("expected computed return in summary, got %q", got)
+	}
+}
+
+func TestFormatHistoricalSummary_EmptyBars(t *testing.T) {
+	got := formatHistoricalSummary("AAPL", 7, nil)
+	if !strings.Contains(got, "No historical data returned") {
+		t.Fatalf("expected empty-data message, got %q", got)
 	}
 }
 

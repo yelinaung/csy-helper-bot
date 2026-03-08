@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dbn_hist "github.com/NimbleMarkets/dbn-go/hist"
 )
 
 type rewriteHostTransport struct {
@@ -582,6 +584,55 @@ func TestHistoricalDateRangeUTC(t *testing.T) {
 	}
 	if !got.Start.Equal(wantStart) {
 		t.Fatalf("start mismatch: got %s want %s", got.Start, wantStart)
+	}
+}
+
+func TestTryAdjustRangeFromDatabento422(t *testing.T) {
+	orig := dbn_hist.SubmitJobParams{
+		DateRange: dbn_hist.DateRange{
+			Start: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	err := &httpStatusError{
+		StatusCode: http.StatusUnprocessableEntity,
+		Status:     "422 Unprocessable Entity",
+		Body:       `{"detail":{"case":"data_end_after_available_end","payload":{"available_end":"2026-03-07T00:00:00.000000000Z"}}}`,
+	}
+
+	adjusted, ok := tryAdjustRangeFromDatabento422(&orig, err, 7)
+	if !ok {
+		t.Fatal("expected adjustment for data_end_after_available_end")
+	}
+	wantEnd := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
+	wantStart := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
+	if !adjusted.DateRange.End.Equal(wantEnd) {
+		t.Fatalf("end mismatch: got %s want %s", adjusted.DateRange.End, wantEnd)
+	}
+	if !adjusted.DateRange.Start.Equal(wantStart) {
+		t.Fatalf("start mismatch: got %s want %s", adjusted.DateRange.Start, wantStart)
+	}
+}
+
+func TestTryAdjustRangeFromDatabento422_NoAdjust(t *testing.T) {
+	orig := dbn_hist.SubmitJobParams{
+		DateRange: dbn_hist.DateRange{
+			Start: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	err := &httpStatusError{
+		StatusCode: http.StatusUnprocessableEntity,
+		Status:     "422 Unprocessable Entity",
+		Body:       `{"detail":{"case":"some_other_error","payload":{"available_end":"2026-03-07T00:00:00.000000000Z"}}}`,
+	}
+
+	gotParams, ok := tryAdjustRangeFromDatabento422(&orig, err, 7)
+	if ok {
+		t.Fatal("did not expect adjustment")
+	}
+	if !gotParams.DateRange.End.Equal(orig.DateRange.End) || !gotParams.DateRange.Start.Equal(orig.DateRange.Start) {
+		t.Fatal("range should remain unchanged when no adjustment is applied")
 	}
 }
 

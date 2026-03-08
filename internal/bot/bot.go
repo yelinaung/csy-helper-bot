@@ -42,6 +42,17 @@ var (
 
 var errDatabentoAPIKeyNotConfigured = errors.New("databento api key not configured")
 
+type httpStatusError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+
+// Error renders HTTP status details for Databento request failures.
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("HTTP %d %s %s", e.StatusCode, e.Status, e.Body)
+}
+
 const (
 	finnhubBaseURL     = "https://finnhub.io/api/v1"
 	leetCodeGraphQLURL = "https://leetcode.com/graphql"
@@ -454,6 +465,8 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	})
 }
 
+// handleHistoricalStock fetches historical bars, renders a chart, and replies
+// with either a photo+caption or a text fallback.
 func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Update, symbol string, days int) {
 	bars, err := fetchHistoricalBars(ctx, symbol, days)
 	if err != nil {
@@ -531,6 +544,7 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 	})
 }
 
+// parseStockCommand parses `!s` commands and validates symbol/range inputs.
 func parseStockCommand(text string) (string, int, error) {
 	if strings.HasPrefix(text, "!s") && len(text) > 2 {
 		if text[2] != ' ' {
@@ -1082,6 +1096,8 @@ func blockedStockResponse(symbol string) (string, bool) {
 	return msg, ok
 }
 
+// fetchHistoricalBars requests Databento daily OHLCV bars and normalizes them
+// into sorted, day-truncated records.
 func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, error) {
 	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))
 	if apiKey == "" {
@@ -1105,6 +1121,13 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 	}
 
 	raw, err := getHistoricalRangeWithContext(ctx, apiKey, &params)
+	if err != nil {
+		// Single-retry path: only retry once when Databento reports that the
+		// requested end date is newer than the dataset's available end date.
+		if retryParams, ok := tryAdjustRangeFromDatabento422(&params, err, days); ok {
+			raw, err = getHistoricalRangeWithContext(ctx, apiKey, &retryParams)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1136,6 +1159,7 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 	return bars, nil
 }
 
+// historicalDateRangeUTC returns a UTC midnight-aligned half-open date range.
 func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
 	end := now.UTC().Truncate(24 * time.Hour)
 	return dbn_hist.DateRange{
@@ -1144,6 +1168,8 @@ func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
 	}
 }
 
+// getHistoricalRangeWithContext performs a context-aware Databento
+// timeseries.get_range request and returns raw DBN bytes.
 func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *dbn_hist.SubmitJobParams) ([]byte, error) {
 	formData := url.Values{}
 	if err := params.ApplyToURLValues(&formData); err != nil {
@@ -1164,7 +1190,8 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 	req.Header.Set("Accept", "application/octet-stream")
 	req.SetBasicAuth(apiKey, "")
 
-	resp, err := histHTTPClient.Do(req) //nolint:gosec // Request URL is a trusted Databento constant; user input is only form-encoded parameters.
+	// Request URL is a trusted Databento constant; user input is only form-encoded parameters.
+	resp, err := histHTTPClient.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}
@@ -1175,11 +1202,50 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d %s %s", resp.StatusCode, resp.Status, string(body))
+		return nil, &httpStatusError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       string(body),
+		}
 	}
 	return body, nil
 }
 
+// tryAdjustRangeFromDatabento422 shifts the query end/start when Databento
+// reports `data_end_after_available_end`, allowing one safe retry.
+func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error, days int) (dbn_hist.SubmitJobParams, bool) {
+	var statusErr *httpStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusUnprocessableEntity {
+		return *params, false
+	}
+
+	var payload struct {
+		Detail struct {
+			Case    string `json:"case"`
+			Payload struct {
+				AvailableEnd string `json:"available_end"`
+			} `json:"payload"`
+		} `json:"detail"`
+	}
+	if unmarshalErr := json.Unmarshal([]byte(statusErr.Body), &payload); unmarshalErr != nil {
+		return *params, false
+	}
+	if payload.Detail.Case != "data_end_after_available_end" || strings.TrimSpace(payload.Detail.Payload.AvailableEnd) == "" {
+		return *params, false
+	}
+
+	availableEnd, parseErr := time.Parse(time.RFC3339Nano, payload.Detail.Payload.AvailableEnd)
+	if parseErr != nil {
+		return *params, false
+	}
+	availableEnd = availableEnd.UTC().Truncate(24 * time.Hour)
+	adjusted := *params
+	adjusted.DateRange.End = availableEnd
+	adjusted.DateRange.Start = availableEnd.AddDate(0, 0, -days)
+	return adjusted, true
+}
+
+// formatHistoricalSummary creates a compact caption for historical responses.
 func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) string {
 	if len(bars) == 0 {
 		return fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days)
@@ -1211,6 +1277,7 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) stri
 	)
 }
 
+// renderHistoricalChartPNG renders close prices as a PNG line chart.
 func renderHistoricalChartPNG(symbol string, days int, bars []HistoricalBar) ([]byte, error) {
 	values := make([]float64, 0, len(bars))
 	labels := make([]string, 0, len(bars))
@@ -1257,7 +1324,8 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL is built from the trusted finnhubBaseURL constant.
+	// URL is built from the trusted finnhubBaseURL constant.
+	resp, err := httpClient.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}
@@ -1298,7 +1366,8 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, e
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL is built from the trusted finnhubBaseURL constant.
+	// URL is built from the trusted finnhubBaseURL constant.
+	resp, err := httpClient.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}
@@ -1412,7 +1481,8 @@ func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL is the trusted leetCodeGraphQLURL constant.
+	// URL is the trusted leetCodeGraphQLURL constant.
+	resp, err := httpClient.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}

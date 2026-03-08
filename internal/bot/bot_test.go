@@ -5,9 +5,51 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
+
+type rewriteHostTransport struct {
+	base   http.RoundTripper
+	target *url.URL
+}
+
+func (t *rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	cloneURL := *req.URL
+	clone.URL = &cloneURL
+	clone.URL.Scheme = t.target.Scheme
+	clone.URL.Host = t.target.Host
+	clone.Host = t.target.Host
+	return t.base.RoundTrip(clone)
+}
+
+func useRedirectedHTTPClient(t *testing.T, serverURL string) {
+	t.Helper()
+
+	target, err := url.Parse(serverURL)
+	if err != nil {
+		t.Fatalf("invalid test server url %q: %v", serverURL, err)
+	}
+
+	orig := httpClient
+	baseTransport := http.DefaultTransport
+	if orig != nil && orig.Transport != nil {
+		baseTransport = orig.Transport
+	}
+	httpClient = &http.Client{
+		Timeout: orig.Timeout,
+		Transport: &rewriteHostTransport{
+			base:   baseTransport,
+			target: target,
+		},
+	}
+
+	t.Cleanup(func() {
+		httpClient = orig
+	})
+}
 
 func TestFetchDailyLeetCode(t *testing.T) {
 	mockResponse := graphQLResponse{}
@@ -27,7 +69,9 @@ func TestFetchDailyLeetCode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	question, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	useRedirectedHTTPClient(t, server.URL)
+
+	question, err := fetchDailyLeetCode(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +93,9 @@ func TestFetchDailyLeetCode_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	useRedirectedHTTPClient(t, server.URL)
+
+	_, err := fetchDailyLeetCode(context.Background())
 	if err == nil {
 		t.Error("expected error for server error response")
 	}
@@ -61,7 +107,9 @@ func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	useRedirectedHTTPClient(t, server.URL)
+
+	_, err := fetchDailyLeetCode(context.Background())
 	if err == nil {
 		t.Error("expected error for invalid JSON response")
 	}
@@ -74,7 +122,9 @@ func TestFetchDailyLeetCode_GraphQLError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	useRedirectedHTTPClient(t, server.URL)
+
+	_, err := fetchDailyLeetCode(context.Background())
 	if err == nil {
 		t.Error("expected error for graphql errors response")
 	}
@@ -87,7 +137,9 @@ func TestFetchDailyLeetCode_EmptyQuestionData(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchDailyLeetCodeFromURL(context.Background(), server.URL)
+	useRedirectedHTTPClient(t, server.URL)
+
+	_, err := fetchDailyLeetCode(context.Background())
 	if err == nil {
 		t.Error("expected error for empty question data")
 	}
@@ -296,7 +348,10 @@ func TestFetchStockQuote(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := fetchStockQuoteFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchStockQuote(context.Background(), "AAPL")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,7 +370,10 @@ func TestFetchStockQuote_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchStockQuoteFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	_, err := fetchStockQuote(context.Background(), "AAPL")
 	if err == nil {
 		t.Error("expected error for server error response")
 	}
@@ -328,7 +386,10 @@ func TestFetchStockQuote_SymbolNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := fetchStockQuoteFromURL(context.Background(), server.URL, "INVALID", "test-key")
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	_, err := fetchStockQuote(context.Background(), "INVALID")
 	if err == nil {
 		t.Error("expected error for symbol not found")
 	}
@@ -351,7 +412,10 @@ func TestFetchCompanyProfile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := fetchCompanyProfileFromURL(context.Background(), server.URL, "AAPL", "test-key")
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchCompanyProfile(context.Background(), "AAPL")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

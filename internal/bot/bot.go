@@ -948,11 +948,7 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
 	}
-	return fetchStockQuoteFromURL(ctx, finnhubBaseURL, symbol, apiKey)
-}
-
-func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string) (*StockQuote, error) {
-	u, err := url.Parse(baseURL + "/quote")
+	u, err := url.Parse(finnhubBaseURL + "/quote")
 	if err != nil {
 		return nil, err
 	}
@@ -966,7 +962,7 @@ func fetchStockQuoteFromURL(ctx context.Context, baseURL, symbol, apiKey string)
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
+	resp, err := httpClient.Do(req) //nolint:gosec // URL is built from the trusted finnhubBaseURL constant.
 	if err != nil {
 		return nil, err
 	}
@@ -993,11 +989,7 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, e
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
 	}
-	return fetchCompanyProfileFromURL(ctx, finnhubBaseURL, symbol, apiKey)
-}
-
-func fetchCompanyProfileFromURL(ctx context.Context, baseURL, symbol, apiKey string) (*CompanyProfile, error) {
-	u, err := url.Parse(baseURL + "/stock/profile2")
+	u, err := url.Parse(finnhubBaseURL + "/stock/profile2")
 	if err != nil {
 		return nil, err
 	}
@@ -1011,7 +1003,7 @@ func fetchCompanyProfileFromURL(ctx context.Context, baseURL, symbol, apiKey str
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
+	resp, err := httpClient.Do(req) //nolint:gosec // URL is built from the trusted finnhubBaseURL constant.
 	if err != nil {
 		return nil, err
 	}
@@ -1103,10 +1095,6 @@ type graphQLResponse struct {
 }
 
 func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
-	return fetchDailyLeetCodeFromURL(ctx, leetCodeGraphQLURL)
-}
-
-func fetchDailyLeetCodeFromURL(ctx context.Context, apiURL string) (*LeetCodeQuestion, error) {
 	query := `{
 		activeDailyCodingChallengeQuestion {
 			question {
@@ -1123,13 +1111,13 @@ func fetchDailyLeetCodeFromURL(ctx context.Context, apiURL string) (*LeetCodeQue
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", leetCodeGraphQLURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req) //nolint:gosec // URL host is controlled by trusted call sites; overridable helper is for tests.
+	resp, err := httpClient.Do(req) //nolint:gosec // URL is the trusted leetCodeGraphQLURL constant.
 	if err != nil {
 		return nil, err
 	}

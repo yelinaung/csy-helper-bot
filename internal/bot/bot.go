@@ -448,6 +448,10 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            formatStockMessage(symbol, quote, profile),
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
 	})
 }
 
@@ -462,7 +466,11 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            msg,
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+			Text: msg,
 		})
 		return
 	}

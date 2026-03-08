@@ -35,7 +35,10 @@ var (
 	botMention     string
 	botUserID      int64
 	allowedGroups  map[int64]struct{}
+	nowFunc        = time.Now
 )
+
+var errDatabentoAPIKeyNotConfigured = errors.New("databento api key not configured")
 
 const (
 	finnhubBaseURL     = "https://finnhub.io/api/v1"
@@ -409,6 +412,10 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
 			Text:            msg,
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
 		})
 		return
 	}
@@ -442,13 +449,17 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 }
 
 func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Update, symbol string, days int) {
-	bars, err := fetchHistoricalBars(symbol, days)
+	bars, err := fetchHistoricalBars(ctx, symbol, days)
 	if err != nil {
+		msg := fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol)
+		if errors.Is(err, errDatabentoAPIKeyNotConfigured) {
+			msg = "Historical data is unavailable: DATABENTO_API_KEY is not configured."
+		}
 		log.Error().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to fetch historical bars")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol),
+			Text:            msg,
 		})
 		return
 	}
@@ -1057,10 +1068,10 @@ func blockedStockResponse(symbol string) (string, bool) {
 	return msg, ok
 }
 
-func fetchHistoricalBars(symbol string, days int) ([]HistoricalBar, error) {
+func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, error) {
 	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))
 	if apiKey == "" {
-		return nil, errors.New("DATABENTO_API_KEY not configured")
+		return nil, errDatabentoAPIKeyNotConfigured
 	}
 
 	dataset := strings.TrimSpace(os.Getenv("DATABENTO_DATASET"))
@@ -1068,18 +1079,18 @@ func fetchHistoricalBars(symbol string, days int) ([]HistoricalBar, error) {
 		dataset = "EQUS.MINI"
 	}
 
-	now := time.Now().UTC()
+	dateRange := historicalDateRangeUTC(nowFunc(), days)
 	params := dbn_hist.SubmitJobParams{
 		Dataset:     dataset,
 		Symbols:     symbol,
 		Schema:      dbn.Schema_Ohlcv1D,
-		DateRange:   dbn_hist.DateRange{Start: now.AddDate(0, 0, -days), End: now},
+		DateRange:   dateRange,
 		Encoding:    dbn.Encoding_Dbn,
 		Compression: dbn.Compress_None,
 		StypeIn:     dbn.SType_RawSymbol,
 	}
 
-	raw, err := dbn_hist.GetRange(apiKey, params)
+	raw, err := getHistoricalRangeWithContext(ctx, apiKey, &params)
 	if err != nil {
 		return nil, err
 	}
@@ -1109,6 +1120,33 @@ func fetchHistoricalBars(symbol string, days int) ([]HistoricalBar, error) {
 		return bars[i].Date.Before(bars[j].Date)
 	})
 	return bars, nil
+}
+
+func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
+	end := now.UTC().Truncate(24 * time.Hour)
+	return dbn_hist.DateRange{
+		Start: end.AddDate(0, 0, -days),
+		End:   end,
+	}
+}
+
+func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *dbn_hist.SubmitJobParams) ([]byte, error) {
+	type result struct {
+		raw []byte
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		raw, err := dbn_hist.GetRange(apiKey, *params)
+		ch <- result{raw: raw, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.raw, res.err
+	}
 }
 
 func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) string {

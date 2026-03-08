@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -491,8 +492,8 @@ func TestParseStockCommand(t *testing.T) {
 		{name: "spot quote", input: "!s AAPL", wantSym: "AAPL", wantDays: 0},
 		{name: "historical 7d", input: "!s AAPL 7d", wantSym: "AAPL", wantDays: 7},
 		{name: "historical 30d", input: "!s msft 30d", wantSym: "MSFT", wantDays: 30},
-		{name: "tab after command", input: "!s\tAAPL", wantSym: "AAPL", wantDays: 0},
-		{name: "newline after command with range", input: "!s\nAAPL 7d", wantSym: "AAPL", wantDays: 7},
+		{name: "tab after command", input: "!s\tAAPL", wantError: true, errSubstr: "invalid usage"},
+		{name: "newline after command with range", input: "!s\nAAPL 7d", wantError: true, errSubstr: "invalid usage"},
 		{name: "missing separator after command", input: "!sAAPL", wantError: true, errSubstr: "invalid usage"},
 		{name: "invalid range", input: "!s AAPL 10d", wantError: true, errSubstr: "invalid range"},
 		{name: "invalid range 1d", input: "!s AAPL 1d", wantError: true, errSubstr: "invalid range"},
@@ -501,6 +502,7 @@ func TestParseStockCommand(t *testing.T) {
 		{name: "invalid symbol punctuation", input: "!s AAPL!", wantError: true, errSubstr: "invalid stock symbol"},
 		{name: "invalid symbol with extra token", input: "!s AA PL", wantError: true, errSubstr: "invalid usage"},
 		{name: "second symbol token", input: "!s AAPL MSFT", wantError: true, errSubstr: "invalid usage"},
+		{name: "nonsensical second token", input: "!s AAPL foobar", wantError: true, errSubstr: "invalid usage"},
 		{name: "empty", input: "!s", wantError: true, errSubstr: "please provide"},
 	}
 
@@ -538,6 +540,13 @@ func TestRenderHistoricalChartPNG(t *testing.T) {
 	}
 	if len(buf) == 0 {
 		t.Fatal("expected non-empty PNG bytes")
+	}
+	if len(buf) < 8 {
+		t.Fatalf("expected PNG bytes length >= 8, got %d", len(buf))
+	}
+	wantSig := []byte{137, 80, 78, 71, 13, 10, 26, 10}
+	if !bytes.Equal(buf[:8], wantSig) {
+		t.Fatalf("invalid PNG signature: got %v want %v", buf[:8], wantSig)
 	}
 }
 

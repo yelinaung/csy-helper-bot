@@ -3,9 +3,11 @@ package bot
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -29,6 +31,7 @@ import (
 
 var (
 	httpClient     = &http.Client{Timeout: 10 * time.Second}
+	histHTTPClient = &http.Client{Timeout: 30 * time.Second}
 	symbolRegex    = regexp.MustCompile(`^[A-Z0-9.\-]{1,10}$`)
 	textExplainer  *geminiExplainer
 	explainLimiter *memoryRateLimiter
@@ -515,8 +518,7 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 
 func parseStockCommand(text string) (string, int, error) {
 	if strings.HasPrefix(text, "!s") && len(text) > 2 {
-		next := text[2]
-		if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+		if text[2] != ' ' {
 			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
 		}
 	}
@@ -552,7 +554,7 @@ func parseStockCommand(text string) (string, int, error) {
 		if symbolRegex.MatchString(strings.ToUpper(parts[1])) {
 			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
 		}
-		return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
+		return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
 	}
 }
 
@@ -1131,22 +1133,40 @@ func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
 }
 
 func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *dbn_hist.SubmitJobParams) ([]byte, error) {
-	type result struct {
-		raw []byte
-		err error
+	formData := url.Values{}
+	if err := params.ApplyToURLValues(&formData); err != nil {
+		return nil, fmt.Errorf("bad params: %w", err)
 	}
-	ch := make(chan result, 1)
-	go func() {
-		raw, err := dbn_hist.GetRange(apiKey, *params)
-		ch <- result{raw: raw, err: err}
-	}()
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-ch:
-		return res.raw, res.err
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		"https://hist.databento.com/v0/timeseries.get_range",
+		strings.NewReader(formData.Encode()),
+	)
+	if err != nil {
+		return nil, err
 	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/octet-stream")
+	auth := base64.StdEncoding.EncodeToString([]byte(apiKey + ":"))
+	req.Header.Set("Authorization", "Basic "+auth)
+
+	resp, err := histHTTPClient.Do(req) //nolint:gosec // Request URL is a trusted Databento constant; user input is only form-encoded parameters.
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d %s %s", resp.StatusCode, resp.Status, string(body))
+	}
+	return body, nil
 }
 
 func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) string {

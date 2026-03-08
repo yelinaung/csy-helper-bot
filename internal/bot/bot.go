@@ -433,19 +433,32 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
+	loadingText := fmt.Sprintf("Fetching data for %s...", symbol)
 	if days > 0 {
-		handleHistoricalStock(ctx, b, update, symbol, days)
+		loadingText = fmt.Sprintf("Fetching %d-day historical data for %s...", days, symbol)
+	}
+	loadingMsg, loadingErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            loadingText,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if loadingErr != nil {
+		log.Warn().Err(loadingErr).Str("symbol", symbol).Int("days", days).Msg("Failed to send stock loading state")
+	}
+
+	if days > 0 {
+		handleHistoricalStock(ctx, b, update, symbol, days, loadingMsg, loadingErr)
 		return
 	}
 
 	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote")
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf("Failed to fetch stock quote for %s. Please try again later.", symbol),
-		})
+		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("Failed to fetch stock quote for %s. Please try again later.", symbol))
 		return
 	}
 
@@ -454,20 +467,20 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to fetch company profile")
 	}
 
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          update.Message.Chat.ID,
-		MessageThreadID: update.Message.MessageThreadID,
-		Text:            formatStockMessage(symbol, quote, profile),
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                update.Message.ID,
-			AllowSendingWithoutReply: true,
-		},
-	})
+	sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, formatStockMessage(symbol, quote, profile))
 }
 
 // handleHistoricalStock fetches historical bars, renders a chart, and replies
 // with either a photo+caption or a text fallback.
-func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Update, symbol string, days int) {
+func handleHistoricalStock(
+	ctx context.Context,
+	b *bot.Bot,
+	update *models.Update,
+	symbol string,
+	days int,
+	loadingMsg *models.Message,
+	loadingErr error,
+) {
 	bars, err := fetchHistoricalBars(ctx, symbol, days)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol)
@@ -475,27 +488,11 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 			msg = "Historical data is unavailable: DATABENTO_API_KEY is not configured."
 		}
 		log.Error().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to fetch historical bars")
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			ReplyParameters: &models.ReplyParameters{
-				MessageID:                update.Message.ID,
-				AllowSendingWithoutReply: true,
-			},
-			Text: msg,
-		})
+		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, msg)
 		return
 	}
 	if len(bars) == 0 {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days),
-			ReplyParameters: &models.ReplyParameters{
-				MessageID:                update.Message.ID,
-				AllowSendingWithoutReply: true,
-			},
-		})
+		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days))
 		return
 	}
 
@@ -503,17 +500,11 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 	chartPNG, err := renderHistoricalChartPNG(symbol, days, bars)
 	if err != nil {
 		log.Warn().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to render historical chart; sending text only")
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            caption,
-			ReplyParameters: &models.ReplyParameters{
-				MessageID:                update.Message.ID,
-				AllowSendingWithoutReply: true,
-			},
-		})
+		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, caption)
 		return
 	}
+
+	updateStockLoadingState(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("Fetched %d-day historical data for %s. Sending chart...", days, symbol))
 
 	_, sendErr := b.SendPhoto(ctx, &bot.SendPhotoParams{
 		ChatID:          update.Message.Chat.ID,
@@ -529,19 +520,68 @@ func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Updat
 		},
 	})
 	if sendErr == nil {
+		updateStockLoadingState(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("Done. Sent %d-day chart for %s.", days, symbol))
 		return
 	}
 
 	log.Warn().Err(sendErr).Str("symbol", symbol).Int("days", days).Msg("Failed to send historical chart image; sending text only")
+	sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, caption)
+}
+
+// sendOrEditStockResult edits the loading message when available, otherwise it
+// falls back to sending a fresh reply to the original command.
+func sendOrEditStockResult(
+	ctx context.Context,
+	b *bot.Bot,
+	update *models.Update,
+	loadingMsg *models.Message,
+	loadingErr error,
+	text string,
+) {
+	if loadingErr == nil && loadingMsg != nil {
+		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    update.Message.Chat.ID,
+			MessageID: loadingMsg.ID,
+			Text:      text,
+		})
+		if editErr == nil {
+			return
+		}
+		log.Warn().Err(editErr).Int64("chat_id", update.Message.Chat.ID).Int("message_id", loadingMsg.ID).Msg("Failed to edit stock loading message; sending fallback")
+	}
+
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            caption,
+		Text:            text,
 		ReplyParameters: &models.ReplyParameters{
 			MessageID:                update.Message.ID,
 			AllowSendingWithoutReply: true,
 		},
 	})
+}
+
+// updateStockLoadingState best-effort updates the loading message text and does
+// not send fallback messages on edit failure.
+func updateStockLoadingState(
+	ctx context.Context,
+	b *bot.Bot,
+	update *models.Update,
+	loadingMsg *models.Message,
+	loadingErr error,
+	text string,
+) {
+	if loadingErr != nil || loadingMsg == nil {
+		return
+	}
+	_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:    update.Message.Chat.ID,
+		MessageID: loadingMsg.ID,
+		Text:      text,
+	})
+	if editErr != nil {
+		log.Debug().Err(editErr).Int64("chat_id", update.Message.Chat.ID).Int("message_id", loadingMsg.ID).Msg("Failed to update stock loading state")
+	}
 }
 
 // parseStockCommand parses `!s` commands and validates symbol/range inputs.
@@ -1099,6 +1139,10 @@ func blockedStockResponse(symbol string) (string, bool) {
 // fetchHistoricalBars requests Databento daily OHLCV bars and normalizes them
 // into sorted, day-truncated records.
 func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, error) {
+	if days < 1 || days > 30 {
+		return nil, errors.New("historical range must be between 1 and 30 days")
+	}
+
 	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))
 	if apiKey == "" {
 		return nil, errDatabentoAPIKeyNotConfigured

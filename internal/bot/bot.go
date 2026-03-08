@@ -6,16 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	dbn "github.com/NimbleMarkets/dbn-go"
+	dbn_hist "github.com/NimbleMarkets/dbn-go/hist"
+	"github.com/go-analyze/charts"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
@@ -43,6 +48,7 @@ var (
 	markdownLinkRE       = regexp.MustCompile(`\[(.+?)\]\((https?://[^)\s]+)\)`)
 	markdownBoldRE       = regexp.MustCompile(`\*\*(.+?)\*\*|__(.+?)__`)
 	markdownItalicRE     = regexp.MustCompile(`\*([^*\n]+)\*|_([^_\n]+)_`)
+	rangeTokenRE         = regexp.MustCompile(`^[0-9]+d$`)
 )
 
 func Run() error {
@@ -358,6 +364,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
+!s SYMBOL 7d|30d - Get historical chart image (e.g., !s AAPL 7d)
 Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -387,23 +394,12 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 }
 
 func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	symbol := strings.TrimSpace(strings.TrimPrefix(update.Message.Text, "!s "))
-	symbol = strings.ToUpper(symbol)
-
-	if symbol == "" {
+	symbol, days, err := parseStockCommand(update.Message.Text)
+	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            "Please provide a stock symbol. Usage: !s AAPL",
-		})
-		return
-	}
-
-	if !symbolRegex.MatchString(symbol) {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          update.Message.Chat.ID,
-			MessageThreadID: update.Message.MessageThreadID,
-			Text:            "Invalid stock symbol. Use 1-10 alphanumeric characters (e.g., AAPL, BRK.A).",
+			Text:            err.Error(),
 		})
 		return
 	}
@@ -414,6 +410,11 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			MessageThreadID: update.Message.MessageThreadID,
 			Text:            msg,
 		})
+		return
+	}
+
+	if days > 0 {
+		handleHistoricalStock(ctx, b, update, symbol, days)
 		return
 	}
 
@@ -438,6 +439,110 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            formatStockMessage(symbol, quote, profile),
 	})
+}
+
+func handleHistoricalStock(ctx context.Context, b *bot.Bot, update *models.Update, symbol string, days int) {
+	bars, err := fetchHistoricalBars(symbol, days)
+	if err != nil {
+		log.Error().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to fetch historical bars")
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol),
+		})
+		return
+	}
+	if len(bars) == 0 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days),
+		})
+		return
+	}
+
+	caption := formatHistoricalSummary(symbol, days, bars)
+	chartPNG, err := renderHistoricalChartPNG(symbol, days, bars)
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to render historical chart; sending text only")
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            caption,
+		})
+		return
+	}
+
+	_, sendErr := b.SendPhoto(ctx, &bot.SendPhotoParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Photo: &models.InputFileUpload{
+			Filename: fmt.Sprintf("%s-%dd.png", strings.ToLower(symbol), days),
+			Data:     bytes.NewReader(chartPNG),
+		},
+		Caption: caption,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if sendErr == nil {
+		return
+	}
+
+	log.Warn().Err(sendErr).Str("symbol", symbol).Int("days", days).Msg("Failed to send historical chart image; sending text only")
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            caption,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+}
+
+func parseStockCommand(text string) (string, int, error) {
+	if strings.HasPrefix(text, "!s") && len(text) > 2 {
+		next := text[2]
+		if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+		}
+	}
+
+	raw := strings.TrimSpace(strings.TrimPrefix(text, "!s"))
+	if raw == "" {
+		return "", 0, errors.New("please provide a stock symbol, usage: !s AAPL or !s AAPL 7d")
+	}
+
+	parts := strings.Fields(raw)
+	if len(parts) > 2 {
+		return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+	}
+
+	symbol := strings.ToUpper(parts[0])
+	if !symbolRegex.MatchString(symbol) {
+		return "", 0, errors.New("invalid stock symbol, use 1-10 alphanumeric characters (e.g., AAPL, BRK.A)")
+	}
+
+	if len(parts) == 1 {
+		return symbol, 0, nil
+	}
+
+	switch strings.ToLower(parts[1]) {
+	case "7d":
+		return symbol, 7, nil
+	case "30d":
+		return symbol, 30, nil
+	default:
+		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
+			return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
+		}
+		if symbolRegex.MatchString(strings.ToUpper(parts[1])) {
+			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+		}
+		return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
+	}
 }
 
 func initGeminiExplainer() (*geminiExplainer, error) {
@@ -936,11 +1041,136 @@ type CompanyProfile struct {
 	Exchange             string  `json:"exchange"`
 }
 
+type HistoricalBar struct {
+	Date   time.Time
+	Open   float64
+	High   float64
+	Low    float64
+	Close  float64
+	Volume uint64
+}
+
 var blockedStocks = map[string]string{}
 
 func blockedStockResponse(symbol string) (string, bool) {
 	msg, ok := blockedStocks[symbol]
 	return msg, ok
+}
+
+func fetchHistoricalBars(symbol string, days int) ([]HistoricalBar, error) {
+	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))
+	if apiKey == "" {
+		return nil, errors.New("DATABENTO_API_KEY not configured")
+	}
+
+	dataset := strings.TrimSpace(os.Getenv("DATABENTO_DATASET"))
+	if dataset == "" {
+		dataset = "EQUS.MINI"
+	}
+
+	now := time.Now().UTC()
+	params := dbn_hist.SubmitJobParams{
+		Dataset:     dataset,
+		Symbols:     symbol,
+		Schema:      dbn.Schema_Ohlcv1D,
+		DateRange:   dbn_hist.DateRange{Start: now.AddDate(0, 0, -days), End: now},
+		Encoding:    dbn.Encoding_Dbn,
+		Compression: dbn.Compress_None,
+		StypeIn:     dbn.SType_RawSymbol,
+	}
+
+	raw, err := dbn_hist.GetRange(apiKey, params)
+	if err != nil {
+		return nil, err
+	}
+
+	records, _, err := dbn.ReadDBNToSlice[dbn.OhlcvMsg](bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+
+	bars := make([]HistoricalBar, 0, len(records))
+	for _, rec := range records {
+		if rec.Header.TsEvent > uint64(math.MaxInt64) {
+			return nil, errors.New("invalid timestamp from historical data")
+		}
+		ts := time.Unix(0, int64(rec.Header.TsEvent)).UTC().Truncate(24 * time.Hour)
+		bars = append(bars, HistoricalBar{
+			Date:   ts,
+			Open:   float64(rec.Open) / 1e9,
+			High:   float64(rec.High) / 1e9,
+			Low:    float64(rec.Low) / 1e9,
+			Close:  float64(rec.Close) / 1e9,
+			Volume: rec.Volume,
+		})
+	}
+
+	sort.Slice(bars, func(i, j int) bool {
+		return bars[i].Date.Before(bars[j].Date)
+	})
+	return bars, nil
+}
+
+func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) string {
+	if len(bars) == 0 {
+		return fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days)
+	}
+
+	first := bars[0]
+	last := bars[len(bars)-1]
+	high := bars[0].High
+	low := bars[0].Low
+	for _, bar := range bars[1:] {
+		if bar.High > high {
+			high = bar.High
+		}
+		if bar.Low < low {
+			low = bar.Low
+		}
+	}
+
+	change := 0.0
+	if first.Close != 0 {
+		change = (last.Close - first.Close) / first.Close * 100
+	}
+	return fmt.Sprintf(
+		"%s %dd (%s to %s)\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f",
+		symbol,
+		days,
+		first.Date.Format("2006-01-02"),
+		last.Date.Format("2006-01-02"),
+		last.Close,
+		change,
+		low,
+		high,
+	)
+}
+
+func renderHistoricalChartPNG(symbol string, days int, bars []HistoricalBar) ([]byte, error) {
+	values := make([]float64, 0, len(bars))
+	labels := make([]string, 0, len(bars))
+	for _, bar := range bars {
+		values = append(values, bar.Close)
+		labels = append(labels, bar.Date.Format("01-02"))
+	}
+
+	p, err := charts.LineRender(
+		[][]float64{values},
+		charts.TitleTextOptionFunc(fmt.Sprintf("%s %dD Close", symbol, days)),
+		charts.LegendLabelsOptionFunc([]string{symbol}),
+		charts.XAxisLabelsOptionFunc(labels),
+		func(opt *charts.ChartOption) {
+			opt.Symbol = charts.SymbolCircle
+			opt.LineStrokeWidth = 1.2
+			opt.ValueFormatter = func(f float64) string {
+				return fmt.Sprintf("%.2f", f)
+			}
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return p.Bytes()
 }
 
 func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {

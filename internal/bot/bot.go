@@ -1189,7 +1189,7 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) stri
 	last := bars[len(bars)-1]
 	high := bars[0].High
 	low := bars[0].Low
-	for _, bar := range bars[:1] {
+	for _, bar := range bars[1:] {
 		high = math.Max(high, bar.High)
 		low = math.Min(low, bar.Low)
 	}

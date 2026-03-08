@@ -3,7 +3,6 @@ package bot
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -551,7 +550,7 @@ func parseStockCommand(text string) (string, int, error) {
 
 	symbol := strings.ToUpper(parts[0])
 	if !symbolRegex.MatchString(symbol) {
-		return "", 0, errors.New("invalid stock symbol, use 1-10 alphanumeric characters (e.g., AAPL, BRK.A)")
+		return "", 0, errors.New("invalid stock symbol, use 1-10 characters: letters, numbers, dots (.) or dashes (-), e.g., AAPL, BRK.A")
 	}
 
 	if len(parts) == 1 {
@@ -566,9 +565,6 @@ func parseStockCommand(text string) (string, int, error) {
 	default:
 		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
 			return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
-		}
-		if symbolRegex.MatchString(strings.ToUpper(parts[1])) {
-			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
 		}
 		return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
 	}
@@ -1166,8 +1162,7 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/octet-stream")
-	auth := base64.StdEncoding.EncodeToString([]byte(apiKey + ":"))
-	req.Header.Set("Authorization", "Basic "+auth)
+	req.SetBasicAuth(apiKey, "")
 
 	resp, err := histHTTPClient.Do(req) //nolint:gosec // Request URL is a trusted Databento constant; user input is only form-encoded parameters.
 	if err != nil {
@@ -1194,13 +1189,9 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) stri
 	last := bars[len(bars)-1]
 	high := bars[0].High
 	low := bars[0].Low
-	for _, bar := range bars[1:] {
-		if bar.High > high {
-			high = bar.High
-		}
-		if bar.Low < low {
-			low = bar.Low
-		}
+	for _, bar := range bars[:1] {
+		high = math.Max(high, bar.High)
+		low = math.Min(low, bar.Low)
 	}
 
 	change := 0.0

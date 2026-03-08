@@ -557,7 +557,7 @@ func TestFormatHistoricalSummary(t *testing.T) {
 		{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Close: 100, High: 102, Low: 99},
 		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 110, High: 111, Low: 98},
 	}
-	got := formatHistoricalSummary("AAPL", 7, bars)
+	got := formatHistoricalSummary("AAPL", 7, bars, nil)
 	if !strings.Contains(got, "AAPL 7d") {
 		t.Fatalf("expected symbol and range in summary, got %q", got)
 	}
@@ -567,9 +567,32 @@ func TestFormatHistoricalSummary(t *testing.T) {
 }
 
 func TestFormatHistoricalSummary_EmptyBars(t *testing.T) {
-	got := formatHistoricalSummary("AAPL", 7, nil)
+	got := formatHistoricalSummary("AAPL", 7, nil, nil)
 	if !strings.Contains(got, "No historical data returned") {
 		t.Fatalf("expected empty-data message, got %q", got)
+	}
+}
+
+func TestFormatHistoricalSummary_WithProfile(t *testing.T) {
+	bars := []HistoricalBar{
+		{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Close: 100, High: 102, Low: 99},
+		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 110, High: 111, Low: 98},
+	}
+	profile := &CompanyProfile{
+		Name:                 "Microsoft Corporation",
+		MarketCapitalization: 439620,
+		Industry:             "Technology",
+	}
+
+	got := formatHistoricalSummary("MSFT", 7, bars, profile)
+	if !strings.Contains(got, "Microsoft Corporation (MSFT)") {
+		t.Fatalf("expected company title in summary, got %q", got)
+	}
+	if !strings.Contains(got, "🏢 Market Cap: $439.62B") {
+		t.Fatalf("expected market cap in summary, got %q", got)
+	}
+	if !strings.Contains(got, "🏭 Industry: Technology") {
+		t.Fatalf("expected industry in summary, got %q", got)
 	}
 }
 

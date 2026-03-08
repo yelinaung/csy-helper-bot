@@ -496,7 +496,12 @@ func handleHistoricalStock(
 		return
 	}
 
-	caption := formatHistoricalSummary(symbol, days, bars)
+	profile, profileErr := fetchCompanyProfile(ctx, symbol)
+	if profileErr != nil {
+		log.Warn().Err(profileErr).Str("symbol", symbol).Msg("Failed to fetch company profile for historical stock response")
+	}
+
+	caption := formatHistoricalSummary(symbol, days, bars, profile)
 	chartPNG, err := renderHistoricalChartPNG(symbol, days, bars)
 	if err != nil {
 		log.Warn().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to render historical chart; sending text only")
@@ -1290,7 +1295,7 @@ func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error,
 }
 
 // formatHistoricalSummary creates a compact caption for historical responses.
-func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) string {
+func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar, profile *CompanyProfile) string {
 	if len(bars) == 0 {
 		return fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days)
 	}
@@ -1308,9 +1313,24 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) stri
 	if first.Close != 0 {
 		change = (last.Close - first.Close) / first.Close * 100
 	}
+	title := symbol
+	marketCapStr := ""
+	industryStr := ""
+	if profile != nil {
+		if profile.Name != "" {
+			title = profile.Name + " (" + symbol + ")"
+		}
+		if profile.MarketCapitalization > 0 {
+			marketCapStr = fmt.Sprintf("\n🏢 Market Cap: $%.2fB", profile.MarketCapitalization/1000)
+		}
+		if profile.Industry != "" {
+			industryStr = "\n🏭 Industry: " + profile.Industry
+		}
+	}
+
 	return fmt.Sprintf(
-		"%s %dd (%s to %s)\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f",
-		symbol,
+		"%s %dd (%s to %s)\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f%s%s",
+		title,
 		days,
 		first.Date.Format("2006-01-02"),
 		last.Date.Format("2006-01-02"),
@@ -1318,6 +1338,8 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar) stri
 		change,
 		low,
 		high,
+		marketCapStr,
+		industryStr,
 	)
 }
 

@@ -631,13 +631,13 @@ func TestFormatTelegramMarkdown(t *testing.T) {
 	if !strings.Contains(got, "*world*") {
 		t.Fatalf("expected double-underscore bold conversion, got %q", got)
 	}
-	if !strings.Contains(got, `\_italic\_`) {
-		t.Fatalf("expected plain underscores escaped for MarkdownV2, got %q", got)
+	if !strings.Contains(got, `_italic_`) {
+		t.Fatalf("expected single-underscore emphasis preserved, got %q", got)
 	}
 	if !strings.Contains(got, "`x_y`") {
 		t.Fatalf("expected inline code preserved, got %q", got)
 	}
-	if !strings.Contains(got, `\*crushes\*`) {
-		t.Fatalf("expected single-asterisk text to be escaped, got %q", got)
+	if !strings.Contains(got, `_crushes_`) {
+		t.Fatalf("expected single-asterisk emphasis preserved, got %q", got)
 	}
 }

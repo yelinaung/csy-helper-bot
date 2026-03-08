@@ -42,6 +42,7 @@ var (
 	markdownInlineCodeRE = regexp.MustCompile("`([^`\n]+)`")
 	markdownLinkRE       = regexp.MustCompile(`\[(.+?)\]\((https?://[^)\s]+)\)`)
 	markdownBoldRE       = regexp.MustCompile(`\*\*(.+?)\*\*|__(.+?)__`)
+	markdownItalicRE     = regexp.MustCompile(`\*([^*\n]+)\*|_([^_\n]+)_`)
 )
 
 func Run() error {
@@ -569,6 +570,23 @@ func formatTelegramMarkdown(text string) string {
 		}
 
 		return addToken("*" + bot.EscapeMarkdownUnescaped(inner) + "*")
+	})
+
+	normalized = markdownItalicRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		submatches := markdownItalicRE.FindStringSubmatch(match)
+		if len(submatches) < 3 {
+			return match
+		}
+
+		inner := strings.TrimSpace(submatches[1])
+		if inner == "" {
+			inner = strings.TrimSpace(submatches[2])
+		}
+		if inner == "" {
+			return match
+		}
+
+		return addToken("_" + bot.EscapeMarkdownUnescaped(inner) + "_")
 	})
 
 	escaped := bot.EscapeMarkdownUnescaped(normalized)

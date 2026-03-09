@@ -637,6 +637,56 @@ func TestTryAdjustRangeFromDatabento422(t *testing.T) {
 	}
 }
 
+func TestTryAdjustRangeFromDatabento422_SchemaNotFullyAvailable(t *testing.T) {
+	orig := dbn_hist.SubmitJobParams{
+		DateRange: dbn_hist.DateRange{
+			Start: time.Date(2026, 2, 7, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	err := &httpStatusError{
+		StatusCode: http.StatusUnprocessableEntity,
+		Status:     "422 Unprocessable Entity",
+		Body:       `{"detail":{"case":"data_schema_not_fully_available","payload":{"available_start":"2023-03-28T00:00:00.000000000Z","available_end":"2026-03-07T00:00:00.000000000Z"}}}`,
+	}
+
+	adjusted, ok := tryAdjustRangeFromDatabento422(&orig, err, 30)
+	if !ok {
+		t.Fatal("expected adjustment for data_schema_not_fully_available")
+	}
+	wantEnd := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
+	wantStart := time.Date(2026, 2, 5, 0, 0, 0, 0, time.UTC)
+	if !adjusted.DateRange.End.Equal(wantEnd) {
+		t.Fatalf("end mismatch: got %s want %s", adjusted.DateRange.End, wantEnd)
+	}
+	if !adjusted.DateRange.Start.Equal(wantStart) {
+		t.Fatalf("start mismatch: got %s want %s", adjusted.DateRange.Start, wantStart)
+	}
+}
+
+func TestTryAdjustRangeFromDatabento422_ClampsToAvailableStart(t *testing.T) {
+	orig := dbn_hist.SubmitJobParams{
+		DateRange: dbn_hist.DateRange{
+			Start: time.Date(2023, 3, 1, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	err := &httpStatusError{
+		StatusCode: http.StatusUnprocessableEntity,
+		Status:     "422 Unprocessable Entity",
+		Body:       `{"detail":{"case":"data_schema_not_fully_available","payload":{"available_start":"2023-03-28T00:00:00.000000000Z","available_end":"2023-04-01T00:00:00.000000000Z"}}}`,
+	}
+
+	adjusted, ok := tryAdjustRangeFromDatabento422(&orig, err, 30)
+	if !ok {
+		t.Fatal("expected adjustment with available_start clamp")
+	}
+	wantStart := time.Date(2023, 3, 28, 0, 0, 0, 0, time.UTC)
+	if !adjusted.DateRange.Start.Equal(wantStart) {
+		t.Fatalf("start mismatch: got %s want %s", adjusted.DateRange.Start, wantStart)
+	}
+}
+
 func TestTryAdjustRangeFromDatabento422_NoAdjust(t *testing.T) {
 	orig := dbn_hist.SubmitJobParams{
 		DateRange: dbn_hist.DateRange{

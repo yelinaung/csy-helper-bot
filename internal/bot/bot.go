@@ -481,7 +481,7 @@ func handleHistoricalStock(
 	loadingMsg *models.Message,
 	loadingErr error,
 ) {
-	bars, err := fetchHistoricalBars(ctx, symbol, days)
+	bars, adjustedNote, err := fetchHistoricalBars(ctx, symbol, days)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol)
 		if errors.Is(err, errDatabentoAPIKeyNotConfigured) {
@@ -502,6 +502,9 @@ func handleHistoricalStock(
 	}
 
 	caption := formatHistoricalSummary(symbol, days, bars, profile)
+	if adjustedNote != "" {
+		caption += "\n" + adjustedNote
+	}
 	chartPNG, err := renderHistoricalChartPNG(symbol, days, bars)
 	if err != nil {
 		log.Warn().Err(err).Str("symbol", symbol).Int("days", days).Msg("Failed to render historical chart; sending text only")
@@ -1143,14 +1146,14 @@ func blockedStockResponse(symbol string) (string, bool) {
 
 // fetchHistoricalBars requests Databento daily OHLCV bars and normalizes them
 // into sorted, day-truncated records.
-func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, error) {
+func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, string, error) {
 	if days < 1 || days > 30 {
-		return nil, errors.New("historical range must be between 1 and 30 days")
+		return nil, "", errors.New("historical range must be between 1 and 30 days")
 	}
 
 	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))
 	if apiKey == "" {
-		return nil, errDatabentoAPIKeyNotConfigured
+		return nil, "", errDatabentoAPIKeyNotConfigured
 	}
 
 	dataset := strings.TrimSpace(os.Getenv("DATABENTO_DATASET"))
@@ -1169,27 +1172,32 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 		StypeIn:     dbn.SType_RawSymbol,
 	}
 
+	adjustedNote := ""
 	raw, err := getHistoricalRangeWithContext(ctx, apiKey, &params)
 	if err != nil {
 		// Single-retry path: only retry once when Databento reports that the
 		// requested end date is newer than the dataset's available end date.
 		if retryParams, ok := tryAdjustRangeFromDatabento422(&params, err, days); ok {
+			adjustedNote = fmt.Sprintf(
+				"Note: data availability lagged; used latest available window ending %s UTC.",
+				retryParams.DateRange.End.Format("2006-01-02"),
+			)
 			raw, err = getHistoricalRangeWithContext(ctx, apiKey, &retryParams)
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	records, _, err := dbn.ReadDBNToSlice[dbn.OhlcvMsg](bytes.NewReader(raw))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	bars := make([]HistoricalBar, 0, len(records))
 	for _, rec := range records {
 		if rec.Header.TsEvent > uint64(math.MaxInt64) {
-			return nil, errors.New("invalid timestamp from historical data")
+			return nil, "", errors.New("invalid timestamp from historical data")
 		}
 		ts := time.Unix(0, int64(rec.Header.TsEvent)).UTC().Truncate(24 * time.Hour)
 		bars = append(bars, HistoricalBar{
@@ -1205,7 +1213,7 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 	sort.Slice(bars, func(i, j int) bool {
 		return bars[i].Date.Before(bars[j].Date)
 	})
-	return bars, nil
+	return bars, adjustedNote, nil
 }
 
 // historicalDateRangeUTC returns a UTC midnight-aligned half-open date range.
@@ -1260,8 +1268,8 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 	return body, nil
 }
 
-// tryAdjustRangeFromDatabento422 shifts the query end/start when Databento
-// reports `data_end_after_available_end`, allowing one safe retry.
+// tryAdjustRangeFromDatabento422 shifts the query window into Databento's
+// available schema range for supported 422 cases, allowing one safe retry.
 func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error, days int) (dbn_hist.SubmitJobParams, bool) {
 	var statusErr *httpStatusError
 	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusUnprocessableEntity {
@@ -1272,14 +1280,21 @@ func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error,
 		Detail struct {
 			Case    string `json:"case"`
 			Payload struct {
-				AvailableEnd string `json:"available_end"`
+				AvailableStart string `json:"available_start"`
+				AvailableEnd   string `json:"available_end"`
 			} `json:"payload"`
 		} `json:"detail"`
 	}
 	if unmarshalErr := json.Unmarshal([]byte(statusErr.Body), &payload); unmarshalErr != nil {
 		return *params, false
 	}
-	if payload.Detail.Case != "data_end_after_available_end" || strings.TrimSpace(payload.Detail.Payload.AvailableEnd) == "" {
+	switch payload.Detail.Case {
+	case "data_end_after_available_end", "data_schema_not_fully_available":
+	default:
+		return *params, false
+	}
+
+	if strings.TrimSpace(payload.Detail.Payload.AvailableEnd) == "" {
 		return *params, false
 	}
 
@@ -1291,6 +1306,20 @@ func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error,
 	adjusted := *params
 	adjusted.DateRange.End = availableEnd
 	adjusted.DateRange.Start = availableEnd.AddDate(0, 0, -days)
+
+	if strings.TrimSpace(payload.Detail.Payload.AvailableStart) != "" {
+		availableStart, startParseErr := time.Parse(time.RFC3339Nano, payload.Detail.Payload.AvailableStart)
+		if startParseErr == nil {
+			availableStart = availableStart.UTC().Truncate(24 * time.Hour)
+			if adjusted.DateRange.Start.Before(availableStart) {
+				adjusted.DateRange.Start = availableStart
+			}
+		}
+	}
+
+	if !adjusted.DateRange.Start.Before(adjusted.DateRange.End) {
+		return *params, false
+	}
 	return adjusted, true
 }
 

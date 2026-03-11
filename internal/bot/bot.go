@@ -1248,7 +1248,7 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 	req.SetBasicAuth(apiKey, "")
 
 	// Request URL is a trusted Databento constant; user input is only form-encoded parameters.
-	resp, err := histHTTPClient.Do(req) //nolint:gosec
+	resp, err := histHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1420,7 +1420,7 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 	}
 
 	// URL is built from the trusted finnhubBaseURL constant.
-	resp, err := httpClient.Do(req) //nolint:gosec
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1462,7 +1462,7 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, e
 	}
 
 	// URL is built from the trusted finnhubBaseURL constant.
-	resp, err := httpClient.Do(req) //nolint:gosec
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1577,7 +1577,7 @@ func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// URL is the trusted leetCodeGraphQLURL constant.
-	resp, err := httpClient.Do(req) //nolint:gosec
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

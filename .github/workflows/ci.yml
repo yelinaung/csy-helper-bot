@@ -105,7 +105,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test -v ./...
+        run: go test -v -coverprofile=coverage.out ./...
 
       - name: Run fuzz tests
         run: |
@@ -117,3 +117,19 @@ jobs:
             FuzzExplainPromptConstruction; do
             go test -run=^$ -fuzz="$target" -fuzztime=20s ./internal/bot
           done
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          THRESHOLD=50
+          echo "Coverage: ${COVERAGE}% (threshold: ${THRESHOLD}%)"
+          if [ "$(awk "BEGIN {print ($COVERAGE < $THRESHOLD)}")" = "1" ]; then
+            echo "Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%!"
+            exit 1
+          fi
+          echo "Coverage check passed!"
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

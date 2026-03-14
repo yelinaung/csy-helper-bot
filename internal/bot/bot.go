@@ -751,36 +751,18 @@ func formatTelegramMarkdown(text string) string {
 	})
 
 	normalized = markdownBoldRE.ReplaceAllStringFunc(normalized, func(match string) string {
-		submatches := markdownBoldRE.FindStringSubmatch(match)
-		if len(submatches) < 3 {
-			return match
-		}
-
-		inner := strings.TrimSpace(submatches[1])
-		if inner == "" {
-			inner = strings.TrimSpace(submatches[2])
-		}
+		inner := extractAlternation(markdownBoldRE, match)
 		if inner == "" {
 			return match
 		}
-
 		return addToken("*" + bot.EscapeMarkdownUnescaped(inner) + "*")
 	})
 
 	normalized = markdownItalicRE.ReplaceAllStringFunc(normalized, func(match string) string {
-		submatches := markdownItalicRE.FindStringSubmatch(match)
-		if len(submatches) < 3 {
-			return match
-		}
-
-		inner := strings.TrimSpace(submatches[1])
-		if inner == "" {
-			inner = strings.TrimSpace(submatches[2])
-		}
+		inner := extractAlternation(markdownItalicRE, match)
 		if inner == "" {
 			return match
 		}
-
 		return addToken("_" + bot.EscapeMarkdownUnescaped(inner) + "_")
 	})
 
@@ -790,6 +772,17 @@ func formatTelegramMarkdown(text string) string {
 	}
 
 	return escaped
+}
+
+func extractAlternation(re *regexp.Regexp, match string) string {
+	submatches := re.FindStringSubmatch(match)
+	if len(submatches) < 3 {
+		return ""
+	}
+	if inner := strings.TrimSpace(submatches[1]); inner != "" {
+		return inner
+	}
+	return strings.TrimSpace(submatches[2])
 }
 
 func escapeCodeMarkdownV2(text string) string {

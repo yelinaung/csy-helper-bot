@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	dbn_hist "github.com/NimbleMarkets/dbn-go/hist"
+	"github.com/go-telegram/bot/models"
 )
 
 type rewriteHostTransport struct {
@@ -736,4 +738,153 @@ func TestSymbolValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHTTPStatusError_Error(t *testing.T) {
+	tests := []struct {
+		name string
+		err  httpStatusError
+		want string
+	}{
+		{
+			name: "typical 404",
+			err:  httpStatusError{StatusCode: 404, Status: "404 Not Found", Body: "page not found"},
+			want: "HTTP 404 404 Not Found page not found",
+		},
+		{
+			name: "500 with body",
+			err:  httpStatusError{StatusCode: 500, Status: "500 Internal Server Error", Body: `{"error":"boom"}`},
+			want: `HTTP 500 500 Internal Server Error {"error":"boom"}`,
+		},
+		{
+			name: "empty body",
+			err:  httpStatusError{StatusCode: 502, Status: "502 Bad Gateway", Body: ""},
+			want: "HTTP 502 502 Bad Gateway ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.err.Error()
+			if got != tt.want {
+				t.Errorf("Error() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizePort(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", "5000"},
+		{"valid 8080", "8080", "8080"},
+		{"zero", "0", "5000"},
+		{"above max", "65536", "5000"},
+		{"negative", "-1", "5000"},
+		{"non-numeric", "abc", "5000"},
+		{"min valid", "1", "1"},
+		{"max valid", "65535", "65535"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizePort(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizePort(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapeLinkURLMarkdownV2(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain URL unchanged", "https://example.com/path", "https://example.com/path"},
+		{"URL with close paren", "https://example.com/foo)", `https://example.com/foo\)`},
+		{"URL with double backslash", `https://example.com/a\\b`, `https://example.com/a\\\\b`},
+		{"both double backslash and paren", `https://example.com/a\\b_(c)`, `https://example.com/a\\\\b_(c\)`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeLinkURLMarkdownV2(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeLinkURLMarkdownV2(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLogIncomingUpdate(t *testing.T) {
+	t.Run("nil update", func(t *testing.T) {
+		logIncomingUpdate(nil, false)
+	})
+
+	t.Run("message update", func(t *testing.T) {
+		logIncomingUpdate(&models.Update{
+			ID: 1,
+			Message: &models.Message{
+				Text: "hello",
+				Chat: models.Chat{Type: models.ChatTypePrivate},
+			},
+		}, true)
+	})
+
+	t.Run("callback update", func(t *testing.T) {
+		logIncomingUpdate(&models.Update{
+			ID:            2,
+			CallbackQuery: &models.CallbackQuery{},
+		}, false)
+	})
+
+	t.Run("empty update", func(t *testing.T) {
+		logIncomingUpdate(&models.Update{ID: 3}, false)
+	})
+}
+
+func TestLogUnmatchedMessage(t *testing.T) {
+	prevMention := botMention
+	defer func() { botMention = prevMention }()
+	botMention = "@testbot"
+
+	t.Run("nil update", func(t *testing.T) {
+		logUnmatchedMessage(nil)
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		logUnmatchedMessage(&models.Update{})
+	})
+
+	t.Run("message with entities", func(t *testing.T) {
+		logUnmatchedMessage(&models.Update{
+			Message: &models.Message{
+				Text: "@testbot hello",
+				Chat: models.Chat{ID: -1001, Type: models.ChatTypeGroup},
+				Entities: []models.MessageEntity{
+					{Type: models.MessageEntityTypeMention, Offset: 0, Length: 8},
+				},
+			},
+		})
+	})
+}
+
+func TestLogAllowedGroups(t *testing.T) {
+	prev := allowedGroups
+	defer func() { allowedGroups = prev }()
+
+	allowedGroups = map[int64]struct{}{
+		-1001: {},
+		-1002: {},
+	}
+
+	logAllowedGroups("test heartbeat")
+
+	// Verify no panic — if we got here the function worked.
+	_ = fmt.Sprintf("logged %d groups", len(allowedGroups))
 }

@@ -2,7 +2,8 @@
 description = "Run Go tests"
 run = [
   "mkdir -p .cache/go-build .cache/go-mod",
-  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go test -v ./...",
+  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go test -v -coverprofile=coverage.out ./...",
+  "go tool cover -func=coverage.out",
 ]
 
 [tasks.lint]

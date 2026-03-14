@@ -1264,6 +1264,16 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 	return body, nil
 }
 
+type databentoErrorPayload struct {
+	Detail struct {
+		Case    string `json:"case"`
+		Payload struct {
+			AvailableStart string `json:"available_start"`
+			AvailableEnd   string `json:"available_end"`
+		} `json:"payload"`
+	} `json:"detail"`
+}
+
 // tryAdjustRangeFromDatabento422 shifts the query window into Databento's
 // available schema range for supported 422 cases, allowing one safe retry.
 func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error, days int) (dbn_hist.SubmitJobParams, bool) {
@@ -1272,15 +1282,7 @@ func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error,
 		return *params, false
 	}
 
-	var payload struct {
-		Detail struct {
-			Case    string `json:"case"`
-			Payload struct {
-				AvailableStart string `json:"available_start"`
-				AvailableEnd   string `json:"available_end"`
-			} `json:"payload"`
-		} `json:"detail"`
-	}
+	var payload databentoErrorPayload
 	if unmarshalErr := json.Unmarshal([]byte(statusErr.Body), &payload); unmarshalErr != nil {
 		return *params, false
 	}

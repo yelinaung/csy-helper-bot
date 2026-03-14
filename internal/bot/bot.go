@@ -54,8 +54,11 @@ func (e *httpStatusError) Error() string {
 }
 
 const (
-	finnhubBaseURL     = "https://finnhub.io/api/v1"
-	leetCodeGraphQLURL = "https://leetcode.com/graphql"
+	finnhubBaseURL       = "https://finnhub.io/api/v1"
+	leetCodeGraphQLURL   = "https://leetcode.com/graphql"
+	invalidUsageSymbol   = "invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d"
+	dateFormatPattern    = "2006-01-02"
+	unexpectedCodeErrMsg = "unexpected status code: %d"
 )
 
 var (
@@ -596,7 +599,7 @@ func updateStockLoadingState(
 func parseStockCommand(text string) (string, int, error) {
 	if strings.HasPrefix(text, "!s") && len(text) > 2 {
 		if text[2] != ' ' {
-			return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+			return "", 0, errors.New(invalidUsageSymbol)
 		}
 	}
 
@@ -607,7 +610,7 @@ func parseStockCommand(text string) (string, int, error) {
 
 	parts := strings.Fields(raw)
 	if len(parts) > 2 {
-		return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+		return "", 0, errors.New(invalidUsageSymbol)
 	}
 
 	symbol := strings.ToUpper(parts[0])
@@ -628,7 +631,7 @@ func parseStockCommand(text string) (string, int, error) {
 		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
 			return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
 		}
-		return "", 0, errors.New("invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d")
+		return "", 0, errors.New(invalidUsageSymbol)
 	}
 }
 
@@ -1180,7 +1183,7 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 		if retryParams, ok := tryAdjustRangeFromDatabento422(&params, err, days); ok {
 			adjustedNote = fmt.Sprintf(
 				"Note: data availability lagged; used latest available window ending %s UTC.",
-				retryParams.DateRange.End.Format("2006-01-02"),
+				retryParams.DateRange.End.Format(dateFormatPattern),
 			)
 			raw, err = getHistoricalRangeWithContext(ctx, apiKey, &retryParams)
 		}
@@ -1361,8 +1364,8 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar, prof
 		"%s %dd (%s to %s)\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f%s%s",
 		title,
 		days,
-		first.Date.Format("2006-01-02"),
-		last.Date.Format("2006-01-02"),
+		first.Date.Format(dateFormatPattern),
+		last.Date.Format(dateFormatPattern),
 		last.Close,
 		change,
 		low,
@@ -1427,7 +1430,7 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
 	var quote StockQuote
@@ -1469,7 +1472,7 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
 	var profile CompanyProfile
@@ -1521,7 +1524,7 @@ func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	}
 
 	emoji := difficultyEmoji[question.Difficulty]
-	date := time.Now().UTC().Format("2006-01-02")
+	date := time.Now().UTC().Format(dateFormatPattern)
 	url := fmt.Sprintf("https://leetcode.com/problems/%s/", question.TitleSlug)
 
 	return fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",
@@ -1584,7 +1587,7 @@ func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
 	var gqlResp graphQLResponse

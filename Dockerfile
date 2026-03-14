@@ -6,8 +6,14 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o csy-helper-bot ./cmd/csy-helper-bot
+COPY cmd/ cmd/
+COPY internal/ internal/
+
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
+    -o csy-helper-bot ./cmd/csy-helper-bot
 
 # Run stage
 FROM alpine:3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659

@@ -1,0 +1,30 @@
+.git/
+.github/
+.cache/
+.claude/
+.idea/
+.vscode/
+
+# Secrets and environment
+.env
+.env.*
+.sops.yaml
+*.decrypted
+
+# Build artifacts
+csy-helper-bot
+*.exe
+*.test
+*.out
+
+# Config not needed in image
+.gitignore
+.golangci.yml
+.gitlab-ci.yml
+.pre-commit-config.yaml
+renovate.json
+Dockerfile
+.dockerignore
+LICENSE
+README.md
+Procfile

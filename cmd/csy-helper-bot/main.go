@@ -10,6 +10,11 @@ import (
 	appbot "gitlab.com/yelinaung/csy-helper-bot/internal/bot"
 )
 
+var (
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	level, err := zerolog.ParseLevel(strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL"))))
 	if err != nil {
@@ -22,6 +27,7 @@ func main() {
 		TimeFormat: time.RFC3339,
 	}).With().Timestamp().Caller().Logger()
 	log.Info().Msgf("Logger initialized (level=%s)", zerolog.GlobalLevel().String())
+	log.Info().Str("commit", commit).Str("build_date", buildDate).Msg("Build info")
 
 	if err := appbot.Run(); err != nil {
 		log.Fatal().Err(err).Msg("Bot stopped")

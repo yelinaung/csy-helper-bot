@@ -15,7 +15,8 @@ run = [
 
 [tasks.format]
 description = "Format Go code"
-run = ["gofumpt -w ."]
+alias = "fmt"
+run = ["find . -name '*.go' -not -path './.cache/*' | xargs gofumpt -w"]
 
 [tasks.push-all]
 description = "Pull with rebase from github, then push current branch to all remotes"

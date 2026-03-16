@@ -1285,7 +1285,7 @@ func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error,
 	}
 
 	var payload databentoErrorPayload
-	if unmarshalErr := json.Unmarshal([]byte(statusErr.Body), &payload); unmarshalErr != nil {
+	if json.Unmarshal([]byte(statusErr.Body), &payload) != nil {
 		return *params, false
 	}
 	switch payload.Detail.Case {

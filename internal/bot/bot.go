@@ -1266,12 +1266,14 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 
 type databentoErrorPayload struct {
 	Detail struct {
-		Case    string `json:"case"`
-		Payload struct {
-			AvailableStart string `json:"available_start"`
-			AvailableEnd   string `json:"available_end"`
-		} `json:"payload"`
+		Case    string           `json:"case"`
+		Payload databentoPayload `json:"payload"`
 	} `json:"detail"`
+}
+
+type databentoPayload struct {
+	AvailableStart string `json:"available_start"`
+	AvailableEnd   string `json:"available_end"`
 }
 
 // tryAdjustRangeFromDatabento422 shifts the query window into Databento's

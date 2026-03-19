@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/NimbleMarkets/dbn-go v0.8.9
 	github.com/go-analyze/charts v0.5.26
-	github.com/go-telegram/bot v1.19.0
+	github.com/go-telegram/bot v1.20.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.34.0
 	google.golang.org/genai v1.51.0

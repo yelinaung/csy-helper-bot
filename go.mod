@@ -3,7 +3,7 @@ module gitlab.com/yelinaung/csy-helper-bot
 go 1.26.1
 
 require (
-	github.com/NimbleMarkets/dbn-go v0.8.9
+	github.com/NimbleMarkets/dbn-go v0.8.10
 	github.com/go-analyze/charts v0.5.26
 	github.com/go-telegram/bot v1.20.0
 	github.com/joho/godotenv v1.5.1

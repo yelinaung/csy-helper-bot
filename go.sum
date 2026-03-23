@@ -10,6 +10,8 @@ github.com/NimbleMarkets/dbn-go v0.8.8 h1:Ec0wlCCwpr+lsb1S9RBs3ECyu4v6cXCyf0fp6N
 github.com/NimbleMarkets/dbn-go v0.8.8/go.mod h1:vmSp8/qdSg8zoS/VnWuNbYJ2yy0qoBlwPDiMD7ldMYM=
 github.com/NimbleMarkets/dbn-go v0.8.9 h1:jzEBJpwVn7xqdAw0cGi/ntoaAHQZKRRU9ryGU4OTUg4=
 github.com/NimbleMarkets/dbn-go v0.8.9/go.mod h1:CTLOhGjMoZ8dvK7nYmtV7QHWAugVZbJ42n261vPWMCk=
+github.com/NimbleMarkets/dbn-go v0.8.10 h1:rWzVuJi9Z9M0IKGeL6BAVdJk8HC78zuDsWrHFyLlR70=
+github.com/NimbleMarkets/dbn-go v0.8.10/go.mod h1:CTLOhGjMoZ8dvK7nYmtV7QHWAugVZbJ42n261vPWMCk=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=

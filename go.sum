@@ -8,6 +8,8 @@ cloud.google.com/go/compute/metadata v0.5.0/go.mod h1:aHnloV2TPI38yx4s9+wAZhHykW
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/NimbleMarkets/dbn-go v0.8.9 h1:jzEBJpwVn7xqdAw0cGi/ntoaAHQZKRRU9ryGU4OTUg4=
 github.com/NimbleMarkets/dbn-go v0.8.9/go.mod h1:CTLOhGjMoZ8dvK7nYmtV7QHWAugVZbJ42n261vPWMCk=
+github.com/NimbleMarkets/dbn-go v0.8.10 h1:rWzVuJi9Z9M0IKGeL6BAVdJk8HC78zuDsWrHFyLlR70=
+github.com/NimbleMarkets/dbn-go v0.8.10/go.mod h1:CTLOhGjMoZ8dvK7nYmtV7QHWAugVZbJ42n261vPWMCk=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=

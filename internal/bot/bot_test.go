@@ -601,8 +601,8 @@ func TestFormatHistoricalSummary_WithProfile(t *testing.T) {
 func TestHistoricalDateRangeUTC(t *testing.T) {
 	now := time.Date(2026, 3, 8, 15, 4, 5, 0, time.FixedZone("UTC+8", 8*3600))
 	got := historicalDateRangeUTC(now, 7)
-	wantEnd := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
-	wantStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
+	wantStart := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
 
 	if !got.End.Equal(wantEnd) {
 		t.Fatalf("end mismatch: got %s want %s", got.End, wantEnd)

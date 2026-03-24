@@ -1213,8 +1213,10 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 }
 
 // historicalDateRangeUTC returns a UTC midnight-aligned half-open date range.
+// The end is set to the previous day so the range stays within Databento's
+// historical (non-live) data boundary.
 func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
-	end := now.UTC().Truncate(24 * time.Hour)
+	end := now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
 	return dbn_hist.DateRange{
 		Start: end.AddDate(0, 0, -days),
 		End:   end,

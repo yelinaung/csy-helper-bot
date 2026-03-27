@@ -246,15 +246,7 @@ func shouldHandleAskMention(update *models.Update) bool {
 		return false
 	}
 
-	after := strings.TrimSpace(suffix)
-	if after == "" {
-		return false
-	}
-	afterLower := strings.ToLower(after)
-	if afterLower == "ask" || strings.HasPrefix(afterLower, "ask ") {
-		return true
-	}
-	return true
+	return strings.TrimSpace(suffix) != ""
 }
 
 func extractAskQuestion(message *models.Message) string {

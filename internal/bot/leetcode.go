@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -121,7 +120,7 @@ func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	}
 
 	emoji := difficultyEmoji[question.Difficulty]
-date := nowFunc().UTC().Format(dateFormatPattern)
+	date := nowFunc().UTC().Format(dateFormatPattern)
 	url := fmt.Sprintf("https://leetcode.com/problems/%s/", question.TitleSlug)
 
 	return fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",

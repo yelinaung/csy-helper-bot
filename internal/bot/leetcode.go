@@ -121,7 +121,7 @@ func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	}
 
 	emoji := difficultyEmoji[question.Difficulty]
-	date := time.Now().UTC().Format(dateFormatPattern)
+date := nowFunc().UTC().Format(dateFormatPattern)
 	url := fmt.Sprintf("https://leetcode.com/problems/%s/", question.TitleSlug)
 
 	return fmt.Sprintf("Date: %s\nTitle: %s\nDifficulty: %s %s\n%s",

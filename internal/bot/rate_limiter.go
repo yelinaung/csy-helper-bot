@@ -84,7 +84,7 @@ func loadExplainRateLimiter() *memoryRateLimiter {
 	return newMemoryRateLimiter(limit, window)
 }
 
-func buildExplainRateKey(chatID int64, userID int64) string {
+func buildExplainRateKey(chatID, userID int64) string {
 	if userID != 0 {
 		return fmt.Sprintf("chat:%d:user:%d", chatID, userID)
 	}

@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -490,8 +490,8 @@ func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]Histor
 		})
 	}
 
-	sort.Slice(bars, func(i, j int) bool {
-		return bars[i].Date.Before(bars[j].Date)
+	slices.SortFunc(bars, func(a, b HistoricalBar) int {
+		return a.Date.Compare(b.Date)
 	})
 	return bars, adjustedNote, nil
 }

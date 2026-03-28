@@ -23,18 +23,24 @@ type graphQLRequest struct {
 	Query string `json:"query"`
 }
 
+type graphQLError struct {
+	Message string `json:"message"`
+}
+
+type graphQLQuestion struct {
+	Title      string `json:"title"`
+	TitleSlug  string `json:"titleSlug"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
+	Difficulty string `json:"difficulty"`
+}
+
+type graphQLDailyChallenge struct {
+	Question graphQLQuestion `json:"question"`
+}
+
 type graphQLResponse struct {
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
-	Data struct {
-		ActiveDailyCodingChallengeQuestion struct {
-			Question struct {
-				Title      string `json:"title"`
-				TitleSlug  string `json:"titleSlug"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
-				Difficulty string `json:"difficulty"`
-			} `json:"question"`
-		} `json:"activeDailyCodingChallengeQuestion"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
+	Errors []graphQLError `json:"errors"`
+	Data   struct {
+		ActiveDailyCodingChallengeQuestion graphQLDailyChallenge `json:"activeDailyCodingChallengeQuestion"` //nolint:tagliatelle // LeetCode GraphQL response uses camelCase.
 	} `json:"data"`
 }
 

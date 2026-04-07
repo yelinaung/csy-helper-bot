@@ -33,11 +33,15 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	question := extractAskQuestion(update.Message)
-	if question == "" {
+	quoted := extractQuotedText(update.Message)
+	if question == "" && quoted == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf(`Send "%s your question here".`, botMention),
+			Text: fmt.Sprintf(
+				`Send "%q your question here", or reply to a message with "%q" (optionally followed by a question) to ask about it.`,
+				botMention, botMention,
+			),
 		})
 		return
 	}
@@ -81,8 +85,8 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			Msg("Failed to send thinking message for ask request")
 	}
 
-	respondInBurmese := shouldRespondInBurmese(update.Message.Text)
-	explanation, err := textExplainer.explainWithLanguage(ctx, "", question, respondInBurmese)
+	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quoted)
+	explanation, err := textExplainer.explainWithLanguage(ctx, quoted, question, respondInBurmese)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to answer ask question")
 
@@ -190,18 +194,20 @@ func extractQuotedText(message *models.Message) string {
 		return ""
 	}
 
+	// Prefer the explicitly highlighted Quote snippet over the full replied
+	// message, since it represents the user's specific point of interest.
+	if message.Quote != nil {
+		if quoteText := strings.TrimSpace(message.Quote.Text); quoteText != "" {
+			return quoteText
+		}
+	}
+
 	if message.ReplyToMessage != nil {
 		if txt := strings.TrimSpace(message.ReplyToMessage.Text); txt != "" {
 			return txt
 		}
 		if caption := strings.TrimSpace(message.ReplyToMessage.Caption); caption != "" {
 			return caption
-		}
-	}
-
-	if message.Quote != nil {
-		if quoteText := strings.TrimSpace(message.Quote.Text); quoteText != "" {
-			return quoteText
 		}
 	}
 
@@ -246,7 +252,13 @@ func shouldHandleAskMention(update *models.Update) bool {
 		return false
 	}
 
-	return strings.TrimSpace(suffix) != ""
+	if strings.TrimSpace(suffix) != "" {
+		return true
+	}
+
+	// Bare @bot mention is also valid when it replies to / quotes a message —
+	// the quoted text becomes the thing to explain.
+	return extractQuotedText(update.Message) != ""
 }
 
 func extractAskQuestion(message *models.Message) string {

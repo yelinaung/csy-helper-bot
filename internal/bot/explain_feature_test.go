@@ -59,6 +59,17 @@ func TestExtractQuotedText(t *testing.T) {
 		}
 	})
 
+	t.Run("prefers quote snippet over full replied message", func(t *testing.T) {
+		msg := &models.Message{
+			ReplyToMessage: &models.Message{Text: "the entire long replied message"},
+			Quote:          &models.TextQuote{Text: "highlighted snippet"},
+		}
+		got := extractQuotedText(msg)
+		if got != "highlighted snippet" {
+			t.Fatalf("expected highlighted snippet, got %q", got)
+		}
+	})
+
 	t.Run("returns empty when nothing to explain", func(t *testing.T) {
 		msg := &models.Message{}
 		got := extractQuotedText(msg)
@@ -388,6 +399,64 @@ func TestShouldHandleAskMention(t *testing.T) {
 		}
 		if !shouldHandleAskMention(update) {
 			t.Fatal("expected matcher to pass for quoted message")
+		}
+	})
+
+	t.Run("matches bare mention when replying to a message", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention,
+				ReplyToMessage: &models.Message{
+					Text: "the message being explained",
+				},
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for bare mention with reply")
+		}
+	})
+
+	t.Run("matches bare mention when quoting a snippet", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text:  testBotMention,
+				Quote: &models.TextQuote{Text: "highlighted bit"},
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if !shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to pass for bare mention with quote")
+		}
+	})
+
+	t.Run("does not match bare mention without reply or quote", func(t *testing.T) {
+		update := &models.Update{
+			Message: &models.Message{
+				Text: testBotMention,
+				Entities: []models.MessageEntity{
+					{
+						Type:   models.MessageEntityTypeMention,
+						Offset: 0,
+						Length: len(testBotMention),
+					},
+				},
+			},
+		}
+		if shouldHandleAskMention(update) {
+			t.Fatal("expected matcher to reject bare mention without reply or quote")
 		}
 	})
 }

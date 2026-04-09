@@ -10,11 +10,16 @@ on:
 env:
   GO_VERSION: '1.26'
 
+permissions:
+  contents: read
+
 jobs:
   # Secret Detection
   secret-detection:
     name: Secret Detection
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    permissions:
+      contents: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -25,6 +30,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run GitLeaks
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
@@ -37,6 +43,7 @@ jobs:
     name: SAST Scan
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     permissions:
+      contents: read
       security-events: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -46,6 +53,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Run Semgrep
         uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
@@ -59,6 +68,8 @@ jobs:
   lint:
     name: Lint
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    permissions:
+      contents: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -67,6 +78,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -85,6 +98,8 @@ jobs:
   test:
     name: Test
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    permissions:
+      contents: read
     needs:
       - secret-detection
       - semgrep-sast
@@ -99,6 +114,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0

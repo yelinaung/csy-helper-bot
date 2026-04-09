@@ -93,7 +93,14 @@ func Run() error {
 		if model == "" {
 			model = defaultGeminiModelName
 		}
-		log.Info().Str("model", model).Msg("Gemini explainer initialized")
+		timeout := textExplainer.explainTimeout
+		if timeout <= 0 {
+			timeout = defaultExplainTimeout
+		}
+		log.Info().
+			Str("model", model).
+			Dur("timeout", timeout).
+			Msg("Gemini explainer initialized")
 	}
 	explainLimiter = loadExplainRateLimiter()
 

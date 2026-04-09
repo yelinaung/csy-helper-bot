@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +21,28 @@ func initGeminiExplainer() (*geminiExplainer, error) {
 	}
 
 	model := os.Getenv("GEMINI_MODEL")
-	return newGeminiExplainer(context.Background(), apiKey, model)
+	timeout, err := loadGeminiTimeout()
+	if err != nil {
+		return nil, err
+	}
+	return newGeminiExplainer(context.Background(), apiKey, model, timeout)
+}
+
+func loadGeminiTimeout() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("GEMINI_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return defaultExplainTimeout, nil
+	}
+
+	seconds, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid GEMINI_TIMEOUT_SECONDS %q: %w", raw, err)
+	}
+	if seconds <= 0 {
+		return 0, fmt.Errorf("invalid GEMINI_TIMEOUT_SECONDS %q: must be greater than 0", raw)
+	}
+
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {

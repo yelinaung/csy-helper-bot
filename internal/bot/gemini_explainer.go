@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultGeminiModelName   = "gemini-2.5-flash"
-	explainTimeout           = 15 * time.Second
+	explainTimeout           = 30 * time.Second
 	maxExplainInputLength    = 1500
 	maxExplainResponseLength = 3500
 )

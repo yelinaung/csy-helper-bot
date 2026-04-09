@@ -18,7 +18,7 @@ func TestNewGeminiExplainer_EmptyKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := newGeminiExplainer(context.Background(), tt.key)
+			_, err := newGeminiExplainer(context.Background(), tt.key, "")
 			if err == nil {
 				t.Fatal("expected error for empty/whitespace key")
 			}

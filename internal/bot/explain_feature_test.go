@@ -141,16 +141,18 @@ func TestShouldRespondInBurmese(t *testing.T) {
 }
 
 type capturingGenerator struct {
+	capturedModel    string
 	capturedContents []*genai.Content
 	capturedConfig   *genai.GenerateContentConfig
 }
 
 func (c *capturingGenerator) GenerateContent(
 	_ context.Context,
-	_ string,
+	model string,
 	contents []*genai.Content,
 	config *genai.GenerateContentConfig,
 ) (*genai.GenerateContentResponse, error) {
+	c.capturedModel = model
 	c.capturedContents = contents
 	c.capturedConfig = config
 	return &genai.GenerateContentResponse{
@@ -158,6 +160,32 @@ func (c *capturingGenerator) GenerateContent(
 			{Content: &genai.Content{Parts: []*genai.Part{{Text: "explanation"}}}},
 		},
 	}, nil
+}
+
+func TestExplainUsesDefaultModelWhenUnset(t *testing.T) {
+	gen := &capturingGenerator{}
+	explainer := &geminiExplainer{generator: gen}
+
+	_, err := explainer.explainWithLanguage(context.Background(), "test input", "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gen.capturedModel != defaultGeminiModelName {
+		t.Fatalf("expected default model %q, got %q", defaultGeminiModelName, gen.capturedModel)
+	}
+}
+
+func TestExplainUsesConfiguredModel(t *testing.T) {
+	gen := &capturingGenerator{}
+	explainer := &geminiExplainer{generator: gen, model: "gemini-3-flash-preview"}
+
+	_, err := explainer.explainWithLanguage(context.Background(), "test input", "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gen.capturedModel != "gemini-3-flash-preview" {
+		t.Fatalf("expected configured model %q, got %q", "gemini-3-flash-preview", gen.capturedModel)
+	}
 }
 
 func TestPromptContainsNonceDelimiters(t *testing.T) {

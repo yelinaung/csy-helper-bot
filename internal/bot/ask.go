@@ -19,7 +19,8 @@ func initGeminiExplainer() (*geminiExplainer, error) {
 		return nil, errors.New("GEMINI_API_KEY not configured")
 	}
 
-	return newGeminiExplainer(context.Background(), apiKey)
+	model := os.Getenv("GEMINI_MODEL")
+	return newGeminiExplainer(context.Background(), apiKey, model)
 }
 
 func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {

@@ -89,7 +89,11 @@ func Run() error {
 	if initErr != nil {
 		log.Warn().Err(initErr).Msg("Gemini explainer disabled")
 	} else {
-		log.Info().Msg("Gemini explainer initialized")
+		model := strings.TrimSpace(textExplainer.model)
+		if model == "" {
+			model = defaultGeminiModelName
+		}
+		log.Info().Str("model", model).Msg("Gemini explainer initialized")
 	}
 	explainLimiter = loadExplainRateLimiter()
 

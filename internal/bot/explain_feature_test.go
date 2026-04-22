@@ -140,6 +140,29 @@ func TestGeminiExplainer_BlockedCandidateFinishReason(t *testing.T) {
 	}
 }
 
+func TestGeminiExplainer_EmptyStopResponseIsBlocked(t *testing.T) {
+	explainer := &geminiExplainer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{
+						FinishReason: genai.FinishReasonStop,
+						Content:      &genai.Content{Parts: []*genai.Part{{Text: "   "}}},
+						SafetyRatings: []*genai.SafetyRating{
+							{Category: genai.HarmCategoryDangerousContent, Probability: genai.HarmProbabilityNegligible},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := explainer.explainWithLanguage(context.Background(), "hello", "", false)
+	if !errors.Is(err, ErrExplainBlocked) {
+		t.Fatalf("expected ErrExplainBlocked, got %v", err)
+	}
+}
+
 func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 	longText := strings.Repeat("a", maxExplainResponseLength+200)
 	explainer := &geminiExplainer{
@@ -830,18 +853,17 @@ func TestFormatTelegramMarkdown(t *testing.T) {
 func extractPromptPayload(t *testing.T, prompt string) explainPromptPayload {
 	t.Helper()
 
-	start := strings.Index(prompt, "{\n")
-	if start == -1 {
-		t.Fatalf("prompt does not contain JSON payload: %q", prompt)
+	_, payloadText, ok := strings.Cut(prompt, explainPromptPayloadMarker)
+	if !ok {
+		t.Fatalf("prompt does not contain payload marker: %q", prompt)
 	}
-	endOffset := strings.Index(prompt[start:], "\n}")
-	if endOffset == -1 {
-		t.Fatalf("prompt JSON payload is not closed: %q", prompt)
+	payloadText = strings.TrimSpace(payloadText)
+	if !strings.HasPrefix(payloadText, "{") {
+		t.Fatalf("payload marker is not followed by JSON: %q", payloadText)
 	}
 
 	var payload explainPromptPayload
-	payloadText := prompt[start : start+endOffset+2]
-	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+	if err := json.NewDecoder(strings.NewReader(payloadText)).Decode(&payload); err != nil {
 		t.Fatalf("unmarshal prompt payload: %v\npayload:\n%s", err, payloadText)
 	}
 	return payload

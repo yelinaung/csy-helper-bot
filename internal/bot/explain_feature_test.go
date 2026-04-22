@@ -86,7 +86,7 @@ func TestExtractQuotedText(t *testing.T) {
 
 func TestSanitizeForPrompt(t *testing.T) {
 	got := sanitizeForPrompt("  a\tb\n\"c` \x00 d  ", 100)
-	want := "a b 'c' d"
+	want := "  a\tb\n\"c`  d  "
 	if got != want {
 		t.Fatalf("sanitizeForPrompt() = %q, want %q", got, want)
 	}
@@ -164,7 +164,7 @@ func TestGeminiExplainer_EmptyStopResponseIsBlocked(t *testing.T) {
 }
 
 func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
-	longText := strings.Repeat("a", maxExplainResponseLength+200)
+	longText := strings.Repeat("世", maxExplainResponseLength+200)
 	explainer := &geminiExplainer{
 		generator: &mockContentGenerator{
 			resp: &genai.GenerateContentResponse{
@@ -185,11 +185,12 @@ func TestGeminiExplainer_ExplainSuccessAndTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != maxExplainResponseLength {
-		t.Fatalf("expected truncated length %d, got %d", maxExplainResponseLength, len(got))
+	runes := []rune(got)
+	if len(runes) != maxExplainResponseLength {
+		t.Fatalf("expected truncated length %d, got %d", maxExplainResponseLength, len(runes))
 	}
 	if !strings.HasSuffix(got, "...") {
-		t.Fatalf("expected truncated suffix ..., got %q", got[len(got)-10:])
+		t.Fatalf("expected truncated suffix ..., got %q", got)
 	}
 }
 

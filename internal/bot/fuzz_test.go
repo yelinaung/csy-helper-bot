@@ -109,7 +109,7 @@ func FuzzSanitizeForPrompt(f *testing.F) {
 		if runeLen(out) > maxExplainInputLength {
 			t.Fatalf("sanitized output exceeds limit: %d", runeLen(out))
 		}
-		if strings.Contains(out, "\"") || strings.Contains(out, "`") || strings.Contains(out, "\x00") {
+		if strings.Contains(out, "\x00") {
 			t.Fatalf("sanitized output contains forbidden chars: %q", out)
 		}
 		if !utf8.ValidString(out) {

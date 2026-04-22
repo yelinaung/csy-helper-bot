@@ -316,6 +316,15 @@ func TestGenerateConfigContainsSafetySettings(t *testing.T) {
 	}
 }
 
+func TestIsBlockedFinishReason_FailClosedForUnknown(t *testing.T) {
+	if isBlockedFinishReason(genai.FinishReason("NEW_UNKNOWN_REASON")) != true {
+		t.Fatal("expected unknown finish reason to be treated as blocked")
+	}
+	if isBlockedFinishReason(genai.FinishReasonStop) != false {
+		t.Fatal("expected STOP finish reason not to be blocked")
+	}
+}
+
 func TestSanitizeForPromptInjectionPatterns(t *testing.T) {
 	cases := []struct {
 		name  string

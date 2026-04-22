@@ -1,0 +1,231 @@
+# Development Guide
+
+## Build/Test/Lint Commands
+
+- **Go version**: 1.26+
+- **Build**: `mise build`
+- **Test**:
+    - `mise run test` for unit tests
+    - `mise run test-race` to run go tests with race detection
+- **Lint**:
+    - `mise run lint` to run Go vet and golangci-lint
+- **Clean**:
+    - `mise run clean` to remove build and coverage artifacts
+- `grep` is an alias to `rg`.
+
+## Code Style Guidelines
+
+- **Imports**: Use goimports formatting, group stdlib, external, internal packages
+- **Formatting**: Use gofumpt (stricter than gofmt), enabled in golangci-lint
+- **Naming**: Standard Go conventions - PascalCase for exported, camelCase for unexported
+- **Types**: Prefer explicit types, use type aliases for clarity (e.g., `type AgentName string`)
+- **Error handling**: Return errors explicitly, use `fmt.Errorf` for wrapping
+- **Context**: Always pass context.Context as first parameter for operations
+- **Interfaces**: Define interfaces in consuming packages, keep them small and focused
+- **Structs**: Use struct embedding for composition, group related fields
+- **Constants**: Use typed constants with iota for enums, group in const blocks
+- **Testing**: Use testify's `require` package, parallel tests with `t.Parallel()`,
+  `t.SetEnv()` to set environment variables. Always use `t.Tempdir()` when in
+  need of a temporary directory. This directory does not need to be removed.
+- **JSON tags**: Use snake_case for JSON field names
+- **File permissions**: Use octal notation (0o755, 0o644) for file permissions
+- **Comments**: End comments in periods unless comments are at the end of the line.
+
+ALWAYS RUN these `mise run` commands:
+- test
+- test-race
+- test-integration
+
+ENSURE that the test coverage stays at or above 50% (CI enforced).
+
+## Test Patterns
+
+### Unit Tests
+- Use `t.Parallel()` for tests that don't need database.
+- Use table-driven tests for pure functions.
+- Use `testify/require` for assertions.
+- Use `t.Helper()` in test setup functions.
+
+### Database Tests
+- Use `database.TestDB(t)` which skips if `TEST_DATABASE_URL` not set.
+- Run with `-p 1` to avoid race conditions.
+- Do NOT use `t.Parallel()` for database tests.
+
+### Mocking External Dependencies
+- Use interfaces for external SDK calls (e.g., Gemini API).
+- Use adapter pattern to wrap SDK structs.
+- Create separate constructors for testing (e.g., `NewClientWithGenerator`).
+- See `internal/bot/mocks/` for Telegram bot mocks.
+
+### Handler Testing
+- Handlers take concrete `*bot.Bot` type, not interface.
+- Use wrapper functions to test handler logic without calling real handlers.
+- Callback handlers use `EditMessageText` instead of `SendMessage`.
+
+### Edge Cases to Test
+- nil/empty slices and maps.
+- Whitespace-only inputs.
+- Bot mention formats in commands.
+- Non-existent IDs for update/delete operations.
+
+
+## Formatting
+
+- ALWAYS format any Go code you write with `mise fmt`
+
+## Comments
+
+- Comments that live on their own lines should start with capital letters and
+  end with periods. Wrap comments at 78 columns.
+
+## Committing
+
+- ALWAYS run both unit and integraton tests before pushing
+    - Especially, the fail tests with `mise test-integration 2&>1 | grep -w 'FAIL:'`
+- ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
+- ALWAYS run pre-commits before pushing
+- Try to keep commits to one line, not including your attribution. Only use
+  multi-line commits when additional context is truly necessary.
+- Push to all remotes with `mise push-all`.
+
+## Working on the TUI (UI)
+Anytime you starts the work, read the AGENTS.md file
+
+
+<!-- rtk-instructions v2 -->
+# RTK (Rust Token Killer) - Token-Optimized Commands
+
+## Golden Rule
+
+**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
+
+**Important**: Even in command chains with `&&`, use `rtk`:
+```bash
+# ❌ Wrong
+git add . && git commit -m "msg" && git push
+
+# ✅ Correct
+rtk git add . && rtk git commit -m "msg" && rtk git push
+```
+
+## RTK Commands by Workflow
+
+### Build & Compile (80-90% savings)
+```bash
+rtk cargo build         # Cargo build output
+rtk cargo check         # Cargo check output
+rtk cargo clippy        # Clippy warnings grouped by file (80%)
+rtk tsc                 # TypeScript errors grouped by file/code (83%)
+rtk lint                # ESLint/Biome violations grouped (84%)
+rtk prettier --check    # Files needing format only (70%)
+rtk next build          # Next.js build with route metrics (87%)
+```
+
+### Test (90-99% savings)
+```bash
+rtk cargo test          # Cargo test failures only (90%)
+rtk vitest run          # Vitest failures only (99.5%)
+rtk playwright test     # Playwright failures only (94%)
+rtk test <cmd>          # Generic test wrapper - failures only
+```
+
+### Git (59-80% savings)
+```bash
+rtk git status          # Compact status
+rtk git log             # Compact log (works with all git flags)
+rtk git diff            # Compact diff (80%)
+rtk git show            # Compact show (80%)
+rtk git add             # Ultra-compact confirmations (59%)
+rtk git commit          # Ultra-compact confirmations (59%)
+rtk git push            # Ultra-compact confirmations
+rtk git pull            # Ultra-compact confirmations
+rtk git branch          # Compact branch list
+rtk git fetch           # Compact fetch
+rtk git stash           # Compact stash
+rtk git worktree        # Compact worktree
+```
+
+Note: Git passthrough works for ALL subcommands, even those not explicitly listed.
+
+### GitHub (26-87% savings)
+```bash
+rtk gh pr view <num>    # Compact PR view (87%)
+rtk gh pr checks        # Compact PR checks (79%)
+rtk gh run list         # Compact workflow runs (82%)
+rtk gh issue list       # Compact issue list (80%)
+rtk gh api              # Compact API responses (26%)
+```
+
+### JavaScript/TypeScript Tooling (70-90% savings)
+```bash
+rtk pnpm list           # Compact dependency tree (70%)
+rtk pnpm outdated       # Compact outdated packages (80%)
+rtk pnpm install        # Compact install output (90%)
+rtk npm run <script>    # Compact npm script output
+rtk npx <cmd>           # Compact npx command output
+rtk prisma              # Prisma without ASCII art (88%)
+```
+
+### Files & Search (60-75% savings)
+```bash
+rtk ls <path>           # Tree format, compact (65%)
+rtk read <file>         # Code reading with filtering (60%)
+rtk grep <pattern>      # Search grouped by file (75%)
+rtk find <pattern>      # Find grouped by directory (70%)
+```
+
+### Analysis & Debug (70-90% savings)
+```bash
+rtk err <cmd>           # Filter errors only from any command
+rtk log <file>          # Deduplicated logs with counts
+rtk json <file>         # JSON structure without values
+rtk deps                # Dependency overview
+rtk env                 # Environment variables compact
+rtk summary <cmd>       # Smart summary of command output
+rtk diff                # Ultra-compact diffs
+```
+
+### Infrastructure (85% savings)
+```bash
+rtk docker ps           # Compact container list
+rtk docker images       # Compact image list
+rtk docker logs <c>     # Deduplicated logs
+rtk kubectl get         # Compact resource list
+rtk kubectl logs        # Deduplicated pod logs
+```
+
+### Network (65-70% savings)
+```bash
+rtk curl <url>          # Compact HTTP responses (70%)
+rtk wget <url>          # Compact download output (65%)
+```
+
+### Meta Commands
+```bash
+rtk gain                # View token savings statistics
+rtk gain --history      # View command history with savings
+rtk discover            # Analyze Claude Code sessions for missed RTK usage
+rtk proxy <cmd>         # Run command without filtering (for debugging)
+rtk init                # Add RTK instructions to CLAUDE.md
+rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
+```
+
+## Token Savings Overview
+
+| Category | Commands | Typical Savings |
+|----------|----------|-----------------|
+| Tests | vitest, playwright, cargo test | 90-99% |
+| Build | next, tsc, lint, prettier | 70-87% |
+| Git | status, log, diff, add, commit | 59-80% |
+| GitHub | gh pr, gh run, gh issue | 26-87% |
+| Package Managers | pnpm, npm, npx | 70-90% |
+| Files | ls, read, grep, find | 60-75% |
+| Infrastructure | docker, kubectl | 85% |
+| Network | curl, wget | 65-70% |
+
+Overall average: **60-90% token reduction** on common development operations.
+<!-- /rtk-instructions -->
+
+Refer to @CLAUDE.md for additional instructions
+RTK.md:    /home/yelinaung/.codex/RTK.md
+AGENTS.md: @/home/yelinaung/.codex/RTK.md reference already present

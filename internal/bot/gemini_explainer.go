@@ -276,7 +276,7 @@ func truncateRunes(input string, maxLength int) string {
 }
 
 func runeLen(input string) int {
-	return len([]rune(input))
+	return utf8.RuneCountInString(input)
 }
 
 func defaultGeminiSafetySettings() []*genai.SafetySetting {

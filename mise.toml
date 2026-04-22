@@ -11,6 +11,13 @@ run = [
   "go tool cover -func=coverage.out",
 ]
 
+[tasks."test-race"]
+description = "Run Go tests with race detection"
+run = [
+  "mkdir -p .cache/go-build",
+  "GOCACHE=$PWD/.cache/go-build CGO_ENABLED=1 go test -v -race ./...",
+]
+
 [tasks.lint]
 description = "Run golangci-lint with project config"
 run = [

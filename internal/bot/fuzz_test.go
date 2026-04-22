@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
 	"google.golang.org/genai"
@@ -105,11 +106,14 @@ func FuzzSanitizeForPrompt(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, in string) {
 		out := sanitizeForPrompt(in, maxExplainInputLength)
-		if len(out) > maxExplainInputLength {
-			t.Fatalf("sanitized output exceeds limit: %d", len(out))
+		if runeLen(out) > maxExplainInputLength {
+			t.Fatalf("sanitized output exceeds limit: %d", runeLen(out))
 		}
-		if strings.Contains(out, "\"") || strings.Contains(out, "`") || strings.Contains(out, "\x00") {
+		if strings.Contains(out, "\x00") {
 			t.Fatalf("sanitized output contains forbidden chars: %q", out)
+		}
+		if !utf8.ValidString(out) {
+			t.Fatalf("sanitized output contains invalid UTF-8: %q", out)
 		}
 	})
 }
@@ -140,19 +144,21 @@ func FuzzExplainPromptConstruction(f *testing.F) {
 		}
 
 		prompt := gen.capturedContents[0].Parts[0].Text
-		openRe := regexp.MustCompile(`<user_(message|question)_([0-9a-f]{8})>`)
-		matches := openRe.FindAllStringSubmatch(prompt, -1)
-		for _, m := range matches {
-			closeTag := "</user_" + m[1] + "_" + m[2] + ">"
-			if !strings.Contains(prompt, closeTag) {
-				t.Fatalf("missing close tag %q", closeTag)
-			}
+		payload := extractPromptPayload(t, prompt)
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{8}$`, payload.RequestNonce); !matched {
+			t.Fatalf("expected 8-char hex nonce, got %q", payload.RequestNonce)
 		}
-		if sanitizedQuestion != "" && !strings.Contains(prompt, "user_question_") {
-			t.Fatal("expected question block for non-empty question")
+		if payload.Message != sanitizedText {
+			t.Fatalf("message payload = %q, want %q", payload.Message, sanitizedText)
+		}
+		if payload.Question != sanitizedQuestion {
+			t.Fatalf("question payload = %q, want %q", payload.Question, sanitizedQuestion)
+		}
+		if sanitizedQuestion != "" && !strings.Contains(prompt, `"question"`) {
+			t.Fatal("expected question field for non-empty question")
 		}
 		if sanitizedQuestion == "" && sanitizedText != "" &&
-			!strings.Contains(prompt, "Only explain the text above") {
+			!strings.Contains(prompt, "Only explain the message field") {
 			t.Fatal("expected explain reminder for text-only mode")
 		}
 	})

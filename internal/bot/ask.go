@@ -117,6 +117,9 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		if errors.Is(err, ErrExplainTimeout) {
 			errText = "Answer timed out. Please try again."
 		}
+		if errors.Is(err, ErrExplainBlocked) {
+			errText = "I can't answer that request."
+		}
 
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
 		return

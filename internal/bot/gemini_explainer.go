@@ -268,10 +268,10 @@ func truncateRunes(input string, maxLength int) string {
 	if maxLength <= 0 {
 		return ""
 	}
-	runes := []rune(input)
-	if len(runes) <= maxLength {
+	if utf8.RuneCountInString(input) <= maxLength {
 		return input
 	}
+	runes := []rune(input)
 	return string(runes[:maxLength])
 }
 

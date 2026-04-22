@@ -354,6 +354,16 @@ func TestSanitizeForPromptUnicodeTruncation(t *testing.T) {
 	}
 }
 
+func TestSanitizeForPromptInvalidUTF8(t *testing.T) {
+	got := sanitizeForPrompt(string([]byte{0xcc}), maxExplainInputLength)
+	if !utf8.ValidString(got) {
+		t.Fatalf("sanitizeForPrompt returned invalid UTF-8: %q", got)
+	}
+	if got != "\uFFFD" {
+		t.Fatalf("expected invalid UTF-8 to be replaced, got %q", got)
+	}
+}
+
 func TestGenerateNonce(t *testing.T) {
 	n, err := generateNonce()
 	if err != nil {

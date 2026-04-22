@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
 	"google.golang.org/genai"
@@ -110,6 +111,9 @@ func FuzzSanitizeForPrompt(f *testing.F) {
 		}
 		if strings.Contains(out, "\"") || strings.Contains(out, "`") || strings.Contains(out, "\x00") {
 			t.Fatalf("sanitized output contains forbidden chars: %q", out)
+		}
+		if !utf8.ValidString(out) {
+			t.Fatalf("sanitized output contains invalid UTF-8: %q", out)
 		}
 	})
 }

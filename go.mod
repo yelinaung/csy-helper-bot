@@ -7,7 +7,7 @@ require (
 	github.com/go-analyze/charts v0.5.27
 	github.com/go-telegram/bot v1.20.0
 	github.com/joho/godotenv v1.5.1
-	github.com/rs/zerolog v1.35.0
+	github.com/rs/zerolog v1.35.1
 	google.golang.org/genai v1.54.0
 )
 

@@ -43,7 +43,7 @@ jobs:
     name: SAST Scan
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
     container:
-      image: semgrep/semgrep
+      image: semgrep/semgrep@sha256:7810f1d7884974ab6dda7bef8f4a2c8e165ea2142fd8260515d380e4f1407263
     permissions:
       contents: read
       security-events: write

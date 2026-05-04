@@ -42,6 +42,8 @@ jobs:
   semgrep-sast:
     name: SAST Scan
     runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    container:
+      image: semgrep/semgrep
     permissions:
       contents: read
       security-events: write
@@ -57,12 +59,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Semgrep
-        uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
-        with:
-          config: >-
-            p/security-audit
-            p/secrets
-            p/golang
+        run: semgrep scan --config p/security-audit --config p/secrets --config p/golang
 
   # Lint
   lint:

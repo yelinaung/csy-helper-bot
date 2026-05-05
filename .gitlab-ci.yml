@@ -18,7 +18,7 @@ secret_detection:
 
 check_secrets:
   stage: validate
-  image: apteno/alpine-jq:latest
+  image: apteno/alpine-jq:latest@sha256:3470a642109f10a1549037877c94de78de8395d566c197f52bb8521b9aeec273
   tags:
   - playground-bravo
   needs:
@@ -42,7 +42,7 @@ check_secrets:
 
 lint:
   stage: validate
-  image: golangci/golangci-lint:v2.11-alpine
+  image: golangci/golangci-lint:v2.11-alpine@sha256:72bcd68512b4e27540dd3a778a1b7afd45759d8145cfb3c089f1d7af53e718e9
   tags:
   - playground-bravo
   cache:
@@ -55,7 +55,7 @@ lint:
 
 test:
   stage: validate
-  image: golang:1.26-alpine
+  image: golang:1.26-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1
   tags:
   - playground-bravo
   needs:
@@ -87,7 +87,7 @@ semgrep-sast:
 
 check_sast:
   stage: validate
-  image: apteno/alpine-jq:latest
+  image: apteno/alpine-jq:latest@sha256:3470a642109f10a1549037877c94de78de8395d566c197f52bb8521b9aeec273
   tags:
   - playground-bravo
   needs:
@@ -115,7 +115,7 @@ check_sast:
 
 deploy:
   stage: deploy
-  image: alpine:latest
+  image: alpine:latest@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
   tags:
   - playground-bravo
   needs:

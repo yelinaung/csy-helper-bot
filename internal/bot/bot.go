@@ -30,7 +30,7 @@ var (
 const (
 	finnhubBaseURL       = "https://finnhub.io/api/v1"
 	leetCodeGraphQLURL   = "https://leetcode.com/graphql"
-	invalidUsageSymbol   = "invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d"
+	invalidUsageSymbol   = "invalid usage, use !s SYMBOL or !s SYMBOL 7d|30d|60d|90d"
 	dateFormatPattern    = "2006-01-02"
 	unexpectedCodeErrMsg = "unexpected status code: %d"
 )
@@ -359,7 +359,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /help - Show this help message
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
-!s SYMBOL 7d|30d - Get historical chart image (e.g., !s AAPL 7d)
+!s SYMBOL 7d|30d|60d|90d - Get historical chart image (e.g., !s AAPL 7d)
 Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{

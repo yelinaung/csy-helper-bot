@@ -12,7 +12,7 @@ A Telegram bot that provides helpful utilities for developers.
 
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
-- `!s SYMBOL 7d|30d` - Get historical stock chart image + summary (e.g., `!s AAPL 7d`)
+- `!s SYMBOL 7d|30d|60d|90d` - Get historical stock chart image + summary (e.g., `!s AAPL 7d`)
 - `@<bot_username> <question>` - Asks anything with Gemini (works with or without quoting a message)
 - Burmese-aware answers:
   - If requester text or quoted text contains Burmese, answer in Burmese
@@ -57,7 +57,7 @@ A Telegram bot that provides helpful utilities for developers.
 - Stock commands:
   - `!s AAPL` - current quote
   - `!s AAPL 7d` - 7-day historical chart image
-  - `!s AAPL 30d` - 30-day historical chart image
+  - `!s AAPL 30d` - 30-day historical chart image (+ 60d/90d also supported)
 - Ask directly:
   - `@<bot_username> what does mutex mean?`
   - `@<bot_username> can you explain this and that?` (while replying to a quoted message)

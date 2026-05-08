@@ -81,6 +81,9 @@ linters:
     - gocritic
 
   settings:
+    goconst:
+      min-occurrences: 7
+
     errcheck:
       check-type-assertions: true
       check-blank: false

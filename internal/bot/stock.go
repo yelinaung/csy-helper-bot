@@ -298,9 +298,13 @@ func parseStockCommand(text string) (string, int, error) {
 		return symbol, 7, nil
 	case "30d":
 		return symbol, 30, nil
+	case "60d":
+		return symbol, 60, nil
+	case "90d":
+		return symbol, 90, nil
 	default:
 		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
-			return "", 0, errors.New("invalid range, use 7d or 30d (e.g., !s AAPL 7d)")
+			return "", 0, errors.New("invalid range, use 7d, 30d, 60d or 90d (e.g., !s AAPL 7d)")
 		}
 		return "", 0, errors.New(invalidUsageSymbol)
 	}
@@ -427,8 +431,8 @@ func formatStockMessage(symbol string, quote *StockQuote, profile *CompanyProfil
 // fetchHistoricalBars requests Databento daily OHLCV bars and normalizes them
 // into sorted, day-truncated records.
 func fetchHistoricalBars(ctx context.Context, symbol string, days int) ([]HistoricalBar, string, error) {
-	if days < 1 || days > 30 {
-		return nil, "", errors.New("historical range must be between 1 and 30 days")
+	if days < 1 || days > 90 {
+		return nil, "", errors.New("historical range must be between 1 and 90 days")
 	}
 
 	apiKey := strings.TrimSpace(os.Getenv("DATABENTO_API_KEY"))

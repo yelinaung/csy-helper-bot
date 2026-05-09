@@ -56,7 +56,7 @@ stockAnalyzerInstance == nil ──▶ send "not configured", return
 blockedStockResponse(symbol) ──▶ blocked ──▶ send blocked msg, return
       │ OK
       ▼
-analysisLimiter.allow() ──▶ rate limited ──▶ send "Rate limit reached...", return
+allowAnalysisRequest(update.Message) ──▶ rate limited ──▶ send "Rate limit reached...", return
       │ OK
       ▼
 Send "Analyzing data for {symbol}..." loading message
@@ -212,7 +212,7 @@ NUL bytes, and truncates to the given rune budget.
 - **Date filter**: `startPublishedDate` set to 30 days before now (ISO 8601), keeping results fresh
 - **NumResults**: from `EXA_NUM_RESULTS` env (default `5`, capped at `20`)
 - **Contents**: `{"highlights": true}`
-- **Timeout**: 15s via per-request context timeout (`context.WithTimeout`); uses the package-level `httpClient` so the existing `useRedirectedHTTPClient` test seam works without changes
+- **Timeout**: 10s via per-request context timeout (`context.WithTimeout`); uses the package-level `httpClient` (which has `Timeout: 10s`, `bot.go:22`) so the existing `useRedirectedHTTPClient` test seam works without changes
 
 #### Cost Logging
 
@@ -244,46 +244,53 @@ both parsers call:
 ```go
 // extractSymbolToken validates that text starts with "prefix" followed by
 // either end-of-string or a space, then extracts and validates the first token
-// as a stock symbol. It does NOT parse range tokens (7d/30d/60d/90d).
+// as a stock symbol. Returns the validated symbol and all space-split tokens
+// (including the symbol itself as parts[0]). The caller is responsible for
+// range parsing or extra-token rejection. The usageMsg parameter allows each
+// parser to emit its own error text (e.g. invalidUsageSymbol for !s).
 // Does NOT trim leading whitespace — preserves existing behavior where
 // " !s AAPL" is rejected (HasPrefix fails on the space).
-func extractSymbolToken(text string, prefix string) (string, error) {
+func extractSymbolToken(text, prefix, usageMsg string) (symbol string, parts []string, err error) {
     if !strings.HasPrefix(text, prefix) {
-        return "", errors.New("invalid usage, use " + prefix + " SYMBOL (e.g., " + prefix + " AAPL)")
+        return "", nil, errors.New(usageMsg)
     }
 
     remainder := text[len(prefix):]
     if remainder != "" && remainder[0] != ' ' {
-        return "", errors.New("invalid usage, use " + prefix + " SYMBOL (e.g., " + prefix + " AAPL)")
+        return "", nil, errors.New(usageMsg)
     }
 
     args := strings.TrimSpace(remainder)
     if args == "" {
-        return "", errors.New("please provide a stock symbol, usage: " + prefix + " AAPL")
+        return "", nil, errors.New("please provide a stock symbol, usage: " + prefix + " AAPL")
     }
 
-    parts := strings.Fields(args)
-    symbol := strings.ToUpper(parts[0])
+    parts = strings.Fields(args)
+    symbol = strings.ToUpper(parts[0])
     if !symbolRegex.MatchString(symbol) {
-        return "", errors.New("invalid stock symbol, use 1-10 characters: letters, numbers, dots (.) or dashes (-), e.g., AAPL, BRK.A")
+        return "", nil, errors.New("invalid stock symbol, use 1-10 characters: letters, numbers, dots (.) or dashes (-), e.g., AAPL, BRK.A")
     }
 
-    return symbol, nil
+    return symbol, parts, nil
 }
 ```
 
-`parseStockCommand` calls `extractSymbolToken(text, "!s")` then parses the optional
-range token (the `text[2] != ' '` check in stock.go:272 is replaced by the
-`remainder[0] != ' '` check in the helper — same semantics). `parseStockAnalysisCommand`
-calls `extractSymbolToken(text, "!sa")` and rejects any remaining tokens. If the
-extra token is a recognized range suffix (7d/30d/60d/90d), the specialized error
-message is returned; otherwise the generic `analysisInvalidUsageMsg` is used.
+`parseStockCommand` calls `extractSymbolToken(text, "!s", invalidUsageSymbol)` and
+parses the optional range token from `parts[1:]` (the `text[2] != ' '` check in
+`stock.go:272` is replaced by the `remainder[0] != ' '` check in the helper —
+same semantics; `invalidUsageSymbol` is reused from `stock.go:33` — no user-visible
+error text change).
+
+`parseStockAnalysisCommand` calls `extractSymbolToken(text, "!sa", analysisInvalidUsageMsg)`.
+If `len(parts) > 1`, it checks the second token: if it matches a known range
+suffix (7d/30d/60d/90d), the specialized range-rejection error is returned;
+otherwise the generic `analysisInvalidUsageMsg` is used.
 
 #### Constants
 
 ```go
 const (
-    analysisNotConfiguredMsg = "Stock analysis is not available. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY and GEMINI_API_KEY."
+    analysisNotConfiguredMsg = "Stock analysis is not configured. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY and GEMINI_API_KEY."
     analysisInvalidUsageMsg       = "Invalid usage, use !sa SYMBOL (e.g., !sa AAPL)"
     analysisBlockedMsg            = "%s analysis is not available."
     analysisFinnhubErrorMsg       = "Failed to fetch stock data for %s. Please try again later."
@@ -324,6 +331,18 @@ type stockAnalyzer struct {
     timeout   time.Duration
 }
 
+// sanitizedQuote maps Finnhub's terse JSON keys (c, d, dp, h, l, o, pc) to
+// human-readable field names that Gemini can understand in the prompt payload.
+type sanitizedQuote struct {
+    CurrentPrice  float64 `json:"current_price"`
+    Change        float64 `json:"change"`
+    PercentChange float64 `json:"percent_change"`
+    High          float64 `json:"high"`
+    Low           float64 `json:"low"`
+    Open          float64 `json:"open"`
+    PreviousClose float64 `json:"previous_close"`
+}
+
 // sanitizedProfile is what goes into the Gemini prompt payload after
 // sanitization — not the raw CompanyProfile. Profile.Name and Industry come
 // from Finnhub and can be long.
@@ -337,7 +356,7 @@ type sanitizedProfile struct {
 type analysisPromptPayload struct {
     RequestNonce string           `json:"request_nonce"`
     Symbol       string           `json:"symbol"`
-    Quote        *StockQuote      `json:"quote"`
+    Quote        *sanitizedQuote   `json:"quote"`
     Profile      *sanitizedProfile `json:"profile,omitempty"`
     NewsItems    []newsHighlight  `json:"news_items,omitempty"`
 }
@@ -349,7 +368,7 @@ type analysisPromptPayload struct {
 |----------|-----------|---------|
 | `stockAnalysisHandler` | `func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update)` | Main handler |
 | `parseStockAnalysisCommand` | `func parseStockAnalysisCommand(text string) (string, error)` | Parses `!sa SYMBOL`, rejects second token |
-| `extractSymbolToken` | `func extractSymbolToken(text, prefix string) (string, error)` | Shared symbol validation helper |
+| `extractSymbolToken` | `func extractSymbolToken(text, prefix, usageMsg string) (symbol string, parts []string, err error)` | Shared parser helper — validates prefix + separator, returns symbol + all tokens for caller to handle range/extras |
 | `sanitizeAnalysisInput` | `func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload` | Sanitizes all untrusted fields (Profile, NewsItems) with rune budgets before JSON serialization |
 | `exaResultsToHighlights` | `func exaResultsToHighlights(results []exaSearchResult) []newsHighlight` | Converts sanitized Exa results to the provider-agnostic `newsHighlight` struct |
 
@@ -376,7 +395,17 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
     payload := &analysisPromptPayload{
         RequestNonce: "", // set by caller
         Symbol:       sanitizeForPrompt(input.Symbol, 10),
-        Quote:        input.Quote, // float fields, safe
+    }
+    if input.Quote != nil {
+        payload.Quote = &sanitizedQuote{
+            CurrentPrice:  input.Quote.CurrentPrice,
+            Change:        input.Quote.Change,
+            PercentChange: input.Quote.PercentChange,
+            High:          input.Quote.High,
+            Low:           input.Quote.Low,
+            Open:          input.Quote.Open,
+            PreviousClose: input.Quote.PreviousClose,
+        }
     }
 
     if input.Profile != nil {
@@ -413,12 +442,9 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 }
 ```
 
-After building `analysisPromptPayload`, `buildAnalysisPrompt` checks the serialized
-JSON length against `maxPromptTotalRuneLen` (4000 runes) and truncates `NewsItems`
-from the end until the payload fits.
 | `newStockAnalyzer` | `func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error)` | Constructor using `genai.NewClient` |
 | `(*stockAnalyzer).analyze` | `func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) (string, error)` | Builds prompt, calls Gemini, handles errors |
-| `buildAnalysisPrompt` | `func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error)` | Builds prompt with JSON payload + nonce/marker scheme |
+| `buildAnalysisPrompt` | `func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error)` | Builds prompt with JSON payload + nonce/marker scheme. When `len(NewsItems) == 0`, appends `analysisNoNewsNote` to the prompt preamble. |
 | `loadAnalysisTimeout` | `func loadAnalysisTimeout() (time.Duration, error)` | Reads `STOCK_ANALYSIS_TIMEOUT_SECONDS` env, returns error for invalid values (mirrors `loadGeminiTimeout`) |
 
 #### `loadAnalysisTimeout()` — in `stock_analysis.go`
@@ -448,7 +474,7 @@ stockAnalysisHandler
   │
   ├─ blockedStockResponse(symbol) → blocked msg, return
   │
-  ├─ analysisLimiter.allow() → rate limit msg, return
+  ├─ allowAnalysisRequest(update.Message) → rate limit msg, return
   │
   ├─ Send loading: "Analyzing data for {symbol}..."
   │
@@ -490,7 +516,7 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
     defer cancel()
 
     temp := float32(0.3) // slightly higher than explainer (0.2) for analytical variety
-    maxTokens := int32(2000) // 3800-rune response cap ≈ 1200 tokens; 2000 is safe
+    maxTokens := int32(2000) // 3500-rune response cap ≈ 1200 tokens; 2000 is safe
     config := &genai.GenerateContentConfig{
         Temperature:     &temp,
         MaxOutputTokens: maxTokens,
@@ -722,21 +748,20 @@ to each test to prevent cross-test leakage.
 ### 5. `internal/bot/stock.go`
 
 Minimal change: extract `extractSymbolToken` helper that `parseStockCommand` calls
-internally (same symbol validation, no behavioral change).
+internally. `parseStockCommand` passes `invalidUsageSymbol` as the usage message,
+preserving existing error text. `extractSymbolToken` now returns the full token
+list so `parseStockCommand` can parse range tokens from `parts[1:]`.
 
 ```go
-// extractSymbolToken validates a command prefix and extracts/validates the
-// stock symbol from the first token. It does NOT parse range tokens.
-func extractSymbolToken(text string, prefix string) (string, error) {
-    // ...symbol validation shared between !s and !sa ...
-}
-
 func parseStockCommand(text string) (string, int, error) {
-    symbol, err := extractSymbolToken(text, "!s")
+    symbol, parts, err := extractSymbolToken(text, "!s", invalidUsageSymbol)
     if err != nil {
         return "", 0, err
     }
-    // range parsing remains unchanged here
+    if len(parts) == 1 {
+        return symbol, 0, nil
+    }
+    // range parsing unchanged
 }
 ```
 
@@ -895,13 +920,13 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 
 ### Step 0: Extract Shared Parser (`stock.go` change + tests)
 
-1. Extract `extractSymbolToken(text, prefix)` helper from `parseStockCommand`
-2. Refactor `parseStockCommand` to call `extractSymbolToken(text, "!s")` internally
-3. Implement `parseStockAnalysisCommand` calling `extractSymbolToken(text, "!sa")`
+1. Extract `extractSymbolToken(text, prefix, usageMsg)` helper from `parseStockCommand`
+2. Refactor `parseStockCommand` to call `extractSymbolToken(text, "!s", invalidUsageSymbol)` internally
+3. Implement `parseStockAnalysisCommand` calling `extractSymbolToken(text, "!sa", analysisInvalidUsageMsg)`
    + reject-second-token logic
 4. Write `TestParseStockAnalysisCommand` — table-driven (`t.Parallel()` for pure-function tests)
 5. Write `TestRouting_SA_DoesNotTrigger_StockHandler` — confirms `!sa AAPL` not picked up by `!s`/`!s ` registrations
-6. Run existing stock tests to confirm no regression: `rtk mise test`
+6. Run existing stock tests to confirm no regression: `mise run test`
 7. Run `mise run test-race`
 
 ### Step 1: Exa Search Client (`exa_search.go` + tests)
@@ -943,7 +968,7 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 4. Update `/help` text
 5. Run `mise run test`, `mise run test-race`
 
-### Step 4: Integration Test
+### Step 4: End-to-End Test (via standard test suite)
 
 1. Set `STOCK_ANALYSIS_ENABLED=true` via `t.Setenv` + mocked HTTP servers for Finnhub + Exa
 2. End-to-end: `!sa AAPL` → loading → analysis in MarkdownV2
@@ -966,7 +991,7 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 
 | Scenario | Message |
 |----------|---------|
-| Feature not configured | `Stock analysis is not available. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY and GEMINI_API_KEY.` |
+| Feature not configured | `Stock analysis is not configured. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY and GEMINI_API_KEY.` |
 | Invalid command | `Invalid usage, use !sa SYMBOL (e.g., !sa AAPL)` |
 | Historical range rejected | `Stock analysis does not support historical ranges. Use !sa SYMBOL (e.g., !sa AAPL)` |
 | Blocked stock | `{symbol} analysis is not available.` |
@@ -981,7 +1006,7 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| 1 | **Extract `extractSymbolToken` helper** instead of new standalone parser or parameterizing `parseStockCommand` | `parseStockCommand` has range-token logic specific to `!s`. Extracting just symbol validation avoids refactoring risks while keeping both parsers thin. `parseStockAnalysisCommand` = `extractSymbolToken("!sa")` + reject-extra-tokens. |
+| 1 | **Extract `extractSymbolToken` helper** instead of new standalone parser or parameterizing `parseStockCommand` | `parseStockCommand` has range-token logic specific to `!s`. Extracting symbol validation into a 3-arg helper (`text, prefix, usageMsg`) avoids refactoring risks while keeping both parsers thin. `parseStockAnalysisCommand` = `extractSymbolToken("!sa", analysisInvalidUsageMsg)` + reject-extra-tokens. |
 | 2 | **`models.ParseModeMarkdown`** (which IS MarkdownV2 in this library) | In go-telegram/bot v1.20.0: `ParseModeMarkdown = "MarkdownV2"` and `ParseModeMarkdownV1 = "Markdown"`. Since `formatTelegramMarkdown` does V2 escaping, using `ParseModeMarkdown` aligns escaping with parse mode. The constant `ParseModeMarkdownV2` does NOT exist. |
 | 3 | **Footer uses `·` (U+00B7) not `|`** | `|` is reserved in MarkdownV2. If Gemini emits it, the send fails and we fall back to plaintext. Using middle dot in the prompt instruction prevents the failure entirely. |
 | 4 | **`STOCK_ANALYSIS_TIMEOUT_SECONDS`** (unit-suffixed) | Matches codebase convention: `GEMINI_TIMEOUT_SECONDS`, `EXPLAIN_RATE_LIMIT_WINDOW_SECONDS`, `STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS`. |
@@ -1008,4 +1033,4 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 | 25 | **Exa uses package-level `httpClient`** (no dedicated client) | Ensures the existing `useRedirectedHTTPClient` test seam works without modification. Per-request timeout is enforced via `context.WithTimeout` instead of a separate client. |
 | 26 | **`extractSymbolToken` preserves exact whitespace behavior** | Current `parseStockCommand` rejects `" !s AAPL"` because `HasPrefix` fails before trimming. The helper does NOT pre-trim — it checks `HasPrefix` on the raw input and only `TrimSpace` on the remainder after prefix stripping. This is an exact semantic match. |
 | 27 | **URLs kept raw in payload; escaped only by `formatTelegramMarkdown`** | Pre-escaping in `sanitizeExaResults` + `sanitizeAnalysisInput` + final `formatTelegramMarkdown` would triple-escape URLs. Single escape point is correct. |
-| 28 | **Cache key: `query + ":" + numResults`** | `buildStockSearchQuery` depends on both symbol and profile. Keying by query prevents a `profile=nil` call from poisoning the cache for a richer later request. `startPublishedDate` excluded (TTL covers it). Tests varying `EXA_NUM_RESULTS` must reset the cache. |
+| 28 | **Cache key: `query + ":" + numResults`** | `buildStockSearchQuery` depends on both symbol and profile. Keying by query prevents a `profile=nil` call from poisoning the cache for a richer later request. Cost trade-off: if `fetchCompanyProfile` fails transiently on the first call, the nil-profile query creates a cache miss, and the next successful call (with full profile) also creates a fresh request — doubling Exa cost for that symbol pair. `startPublishedDate` excluded (TTL covers it). Tests varying `EXA_NUM_RESULTS` must reset the cache. |

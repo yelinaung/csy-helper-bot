@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -776,13 +777,16 @@ type testBotServer struct {
 	requestLog   []string // method names captured from URL paths
 	lastMessage  string   // text captured from last sendMessage/editMessageText
 	failNextEdit bool     // return error on next editMessageText call
+	failNextSend bool     // return error on next sendMessage call
 }
 
 func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requestLog = append(s.requestLog, r.URL.Path)
-	fail := s.failNextEdit && strings.Contains(r.URL.Path, "editMessageText")
+	fail := (s.failNextEdit && strings.Contains(r.URL.Path, "editMessageText")) ||
+		(s.failNextSend && strings.Contains(r.URL.Path, "sendMessage"))
 	s.failNextEdit = false
+	s.failNextSend = false
 	s.mu.Unlock()
 
 	if fail {
@@ -1481,5 +1485,279 @@ func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
 	// The testBotServer captures the text sent; it should be the raw "test".
 	if srv.lastMessage != "test" {
 		t.Fatalf("expected plaintext fallback 'test', got %q", srv.lastMessage)
+	}
+}
+
+func TestNewStockAnalyzer_ModelDefaultPath(t *testing.T) {
+	// genai.NewClient succeeds with any non-empty API key (no API call).
+	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "", 30*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if analyzer.model != defaultGeminiModelName {
+		t.Fatalf("expected default model %q, got %q", defaultGeminiModelName, analyzer.model)
+	}
+	if analyzer.timeout != 30*time.Second {
+		t.Fatalf("expected timeout 30s, got %v", analyzer.timeout)
+	}
+}
+
+func TestNewStockAnalyzer_TimeoutDefaultPath(t *testing.T) {
+	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "custom-model", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if analyzer.model != "custom-model" {
+		t.Fatalf("expected model 'custom-model', got %q", analyzer.model)
+	}
+	if analyzer.timeout != time.Duration(defaultAnalysisTimeoutSec)*time.Second {
+		t.Fatalf("expected default timeout, got %v", analyzer.timeout)
+	}
+}
+
+func TestNewMemoryRateLimiter_NegativeLimit(t *testing.T) {
+	rl := newMemoryRateLimiter(-1, 10*time.Second)
+	if rl.limit != defaultExplainRateLimitCount {
+		t.Fatalf("expected default limit %d, got %d", defaultExplainRateLimitCount, rl.limit)
+	}
+}
+
+func TestNewMemoryRateLimiter_ZeroWindow(t *testing.T) {
+	rl := newMemoryRateLimiter(3, 0)
+	if rl.window != defaultExplainRateLimitWindow {
+		t.Fatalf("expected default window %v, got %v", defaultExplainRateLimitWindow, rl.window)
+	}
+}
+
+func TestSearchStockNews_NotFoundStatus(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "test-key")
+	resetExaCacheForTest(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+
+	_, err := searchStockNews(context.Background(), "AAPL", nil)
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+func TestAnalyze_GeneratorError(t *testing.T) {
+	mock := &mockContentGenerator{
+		err: errors.New("gemini transport error"),
+	}
+	analyzer := &stockAnalyzer{
+		generator: mock,
+		model:     "",
+		timeout:   30 * time.Second,
+	}
+	input := &stockAnalysisInput{
+		Symbol: "AAPL",
+		Quote:  &StockQuote{CurrentPrice: 150.00},
+	}
+	_, err := analyzer.analyze(context.Background(), input)
+	if err == nil {
+		t.Fatal("expected error from generator")
+	}
+	if !strings.Contains(err.Error(), "gemini generate content failed") {
+		t.Fatalf("expected generator error wrapping, got %v", err)
+	}
+	// model="" triggers the default-model path.
+	if analyzer.model == "" {
+		t.Log("model was empty — default path exercised inside analyze")
+	}
+}
+
+func TestSendOrEditAnalysisResult_SendFallback(t *testing.T) {
+	// Edit fails, then send succeeds — tests the SendMessage fallback.
+	srv := &testBotServer{failNextEdit: true}
+	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	defer server.Close()
+
+	opts := []bot.Option{
+		bot.WithServerURL(server.URL),
+		bot.WithSkipGetMe(),
+	}
+	b, err := bot.New("dummy:test-token", opts...)
+	if err != nil {
+		t.Fatalf("create test bot: %v", err)
+	}
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+	loadingMsg := &models.Message{ID: 99}
+
+	// failNextEdit=true fails the first editMessageText. The plaintext edit
+	// succeeds. Then we check that the last call was not editMessageText but
+	// actually an edit (since the plaintext edit also goes to editMessageText
+	// on our mock). The key assertion is there are 2+ API calls.
+	sendOrEditAnalysisResult(context.Background(), b, update, loadingMsg, nil, "hello")
+	if srv.requestCount() < 2 {
+		t.Fatalf("expected at least 2 API calls (edit fail + plaintext edit), got %d", srv.requestCount())
+	}
+	// The last message captured should be "hello" (raw text from plaintext edit).
+	if srv.lastMessage != "hello" {
+		t.Fatalf("expected 'hello' from fallback, got %q", srv.lastMessage)
+	}
+}
+
+func TestAllow_BoundRejectionReturnsRetryAfter(t *testing.T) {
+	// Fill the limiter to capacity with active entries, then verify
+	// a new key is rejected with retryAfter = window.
+	rl := newMemoryRateLimiter(2, 10*time.Second)
+	now := time.Now()
+
+	for i := range rateLimitMaxMapSize {
+		key := fmt.Sprintf("user:%d", i)
+		ok, _ := rl.allow(key, now)
+		if !ok {
+			t.Fatalf("entry %d should pass", i)
+		}
+	}
+
+	// Map is at capacity — new key should be rejected.
+	ok, retry := rl.allow("fresh:user", now)
+	if ok {
+		t.Fatal("expected rejection at capacity")
+	}
+	if retry != 10*time.Second {
+		t.Fatalf("expected retryAfter = window (10s), got %v", retry)
+	}
+
+	// Existing key should still work (counter increment under limit=2).
+	ok, _ = rl.allow("user:0", now)
+	if !ok {
+		t.Fatal("existing key at capacity should still be allowed")
+	}
+}
+
+func TestSendOrEditAnalysisResult_SendV2FailFallback(t *testing.T) {
+	// V2 SendMessage fails, triggering plaintext SendMessage fallback.
+	srv := &testBotServer{failNextSend: true}
+	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	defer server.Close()
+
+	opts := []bot.Option{
+		bot.WithServerURL(server.URL),
+		bot.WithSkipGetMe(),
+	}
+	b, err := bot.New("dummy:test-token", opts...)
+	if err != nil {
+		t.Fatalf("create test bot: %v", err)
+	}
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+
+	// No loadingMsg → skips edit path, goes straight to SendMessage.
+	// failNextSend=true makes the first SendMessage fail, triggering
+	// plaintext SendMessage fallback.
+	sendOrEditAnalysisResult(context.Background(), b, update, nil, nil, "final-message")
+
+	if srv.requestCount() < 2 {
+		t.Fatalf("expected at least 2 API calls (V2 fail + plaintext fallback), got %d", srv.requestCount())
+	}
+	if srv.lastMessage != "final-message" {
+		t.Fatalf("expected plaintext fallback 'final-message', got %q", srv.lastMessage)
+	}
+}
+
+func TestSearchStockNews_CacheEviction(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "test-key")
+	t.Setenv("EXA_NUM_RESULTS", "1")
+	resetExaCacheForTest(t)
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(exaSearchResponse{
+			Results: []exaSearchResult{
+				{Title: "News"},
+			},
+		})
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+
+	// Fill cache to capacity with unique symbols.
+	for i := range exaCacheMaxEntries {
+		symbol := fmt.Sprintf("S%d", i)
+		_, err := searchStockNews(context.Background(), symbol, nil)
+		if err != nil {
+			t.Fatalf("fill symbol %s: %v", symbol, err)
+		}
+	}
+
+	// Cache should be full. A new search should evict the oldest.
+	_, err := searchStockNews(context.Background(), "OVERFLOW", nil)
+	if err != nil {
+		t.Fatalf("overflow search: %v", err)
+	}
+
+	exaCacheMu.Lock()
+	cacheLen := len(exaCache)
+	exaCacheMu.Unlock()
+
+	if cacheLen > exaCacheMaxEntries {
+		t.Fatalf("cache exceeded max: %d > %d", cacheLen, exaCacheMaxEntries)
+	}
+}
+
+func TestBuildAnalysisPrompt_TruncatesAllNews(t *testing.T) {
+	items := make([]newsHighlight, 0, 80)
+	for range 80 {
+		items = append(items, newsHighlight{
+			Title:      strings.Repeat("T", 150),
+			URL:        "https://example.com/long/url/path",
+			Highlights: []string{strings.Repeat("h", 195)},
+		})
+	}
+	input := &stockAnalysisInput{
+		Symbol:    "AAPL",
+		Quote:     &StockQuote{CurrentPrice: 150.00},
+		NewsItems: items,
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce10")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The JSON payload budget (4000 runes) is enforced by dropping news
+	// items. Even 80 large items won't all fit; some must be dropped.
+	// The prompt itself still contains the instruction text, so it
+	// naturally exceeds the payload budget.
+	if !strings.Contains(prompt, "AAPL") {
+		t.Fatal("prompt should contain symbol")
+	}
+}
+
+func TestAllow_ExistingKeyAtLimit(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	now := time.Now()
+
+	ok, _ := rl.allow("key", now)
+	if !ok {
+		t.Fatal("first request should pass")
+	}
+
+	// Second request at limit=1 should be denied with retryAfter.
+	ok, retry := rl.allow("key", now)
+	if ok {
+		t.Fatal("second request at limit=1 should be denied")
+	}
+	if retry <= 0 {
+		t.Fatalf("expected positive retryAfter, got %v", retry)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -200,7 +201,7 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 	if input.Profile != nil {
 		sp := &sanitizedProfile{
 			Name:       sanitizeForPrompt(input.Profile.Name, maxProfileNameRuneLen),
-			MarketCapB: input.Profile.MarketCapitalization / 1000,
+			MarketCapB: input.Profile.MarketCapitalization / 1000, // Finnhub returns millions USD.
 			Industry:   sanitizeForPrompt(input.Profile.Industry, maxIndustryRuneLen),
 			Exchange:   sanitizeForPrompt(input.Profile.Exchange, maxExchangeRuneLen),
 		}
@@ -240,7 +241,7 @@ func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error
 
 	// Drop news items from the tail while the serialized payload exceeds
 	// the total prompt budget.
-	for len(payload.NewsItems) > 0 && runeLen(string(payloadJSON)) > maxPromptTotalRuneLen {
+	for len(payload.NewsItems) > 0 && utf8.RuneCount(payloadJSON) > maxPromptTotalRuneLen {
 		payload.NewsItems = payload.NewsItems[:len(payload.NewsItems)-1]
 		payloadJSON, err = json.MarshalIndent(payload, "", "  ")
 		if err != nil {
@@ -248,8 +249,10 @@ func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error
 		}
 	}
 
+	// Derive the "no news" note from the final sanitized payload so the
+	// prompt accurately reflects what Gemini receives.
 	noNewsNote := ""
-	if len(input.NewsItems) == 0 {
+	if len(payload.NewsItems) == 0 {
 		noNewsNote = analysisNoNewsNote + "\n\n"
 	}
 
@@ -368,6 +371,14 @@ func sendOrEditAnalysisResult(
 	text = strings.TrimSpace(truncateRunes(text, maxAnalysisResponseRuneLength))
 
 	formatted := formatTelegramMarkdown(text)
+
+	// Escape expansion can push formatted text past Telegram's 4096 limit.
+	// A second truncation pass keeps the payload under the limit while
+	// preferring the plaintext fallback if mid-token truncation breaks
+	// a MarkdownV2 structure.
+	if runeLen(formatted) > 4000 {
+		formatted = truncateRunes(formatted, 4000)
+	}
 
 	if loadingErr == nil && loadingMsg != nil {
 		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{

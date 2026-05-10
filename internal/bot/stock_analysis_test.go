@@ -24,7 +24,7 @@ func TestParseStockAnalysisCommand(t *testing.T) {
 		wantError bool
 		errSubstr string
 	}{
-		{name: "valid symbol", input: "!sa AAPL", wantSym: testSymbolAAPL},
+		{name: "valid symbol", input: testStockCommand, wantSym: testSymbolAAPL},
 		{name: "lowercase symbol uppercased", input: "!sa aapl", wantSym: testSymbolAAPL},
 		{name: "symbol with dot", input: "!sa BRK.A", wantSym: "BRK.A"},
 		{name: "symbol with hyphen", input: "!sa BF-B", wantSym: "BF-B"},
@@ -69,7 +69,7 @@ func TestParseStockAnalysisCommand(t *testing.T) {
 
 func TestRouting_SA_DoesNotTrigger_StockHandler(t *testing.T) {
 	// !sa AAPL should NOT be parsed by parseStockCommand.
-	_, _, err := parseStockCommand("!sa AAPL")
+	_, _, err := parseStockCommand(testStockCommand)
 	if err == nil {
 		t.Fatal("expected !sa AAPL to fail parseStockCommand")
 	}
@@ -103,7 +103,7 @@ func TestBuildAnalysisPrompt_FullData(t *testing.T) {
 			PreviousClose: 147.75,
 		},
 		Profile: &CompanyProfile{
-			Name:                 "Apple Inc",
+			Name:                 testProfileName,
 			MarketCapitalization: 3000000,
 			Industry:             "Technology",
 			Exchange:             "NASDAQ",
@@ -123,7 +123,7 @@ func TestBuildAnalysisPrompt_FullData(t *testing.T) {
 	if !strings.Contains(prompt, "abc12345") {
 		t.Error("prompt should contain nonce")
 	}
-	if !strings.Contains(prompt, "Apple Inc") {
+	if !strings.Contains(prompt, testProfileName) {
 		t.Error("prompt should contain profile name")
 	}
 	if !strings.Contains(prompt, "3000") {
@@ -782,7 +782,9 @@ func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.requestLog = append(s.requestLog, r.URL.Path)
 	// Capture text from multipart form when present. No error-propagation
 	// on parse failure — best-effort capture only.
-	if err := r.ParseMultipartForm(1 << 20); err == nil { //nolint:gosec // 1MB limit is sufficient for test messages
+	const maxFormSize = 1 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	if err := r.ParseMultipartForm(maxFormSize); err == nil { //nolint:gosec,nolintlint
 		if txt := r.FormValue("text"); txt != "" {
 			s.lastMessage = txt
 		}
@@ -864,7 +866,7 @@ func TestStockAnalysisHandler_AnalyzerNil(t *testing.T) {
 		Message: &models.Message{
 			ID:   1,
 			Chat: models.Chat{ID: -1001},
-			Text: "!sa AAPL",
+			Text: testStockCommand,
 		},
 	}
 
@@ -930,7 +932,7 @@ func TestStockAnalysisHandler_RateLimited(t *testing.T) {
 			ID:   1,
 			Chat: models.Chat{ID: -1001},
 			From: &models.User{ID: 77},
-			Text: "!sa AAPL",
+			Text: testStockCommand,
 		},
 	}
 
@@ -1002,7 +1004,7 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 		PreviousClose: 147.75,
 	}
 	mockProfile := CompanyProfile{
-		Name:                 "Apple Inc",
+		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
 		Industry:             "Technology",
 		Exchange:             "NASDAQ",
@@ -1023,9 +1025,9 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/quote":
+		case "/api/v1/quote":
 			_ = json.NewEncoder(w).Encode(mockQuote)
-		case "/stock/profile2":
+		case "/api/v1/stock/profile2":
 			_ = json.NewEncoder(w).Encode(mockProfile)
 		default:
 			_ = json.NewEncoder(w).Encode(mockExaResp)
@@ -1061,7 +1063,7 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 		Message: &models.Message{
 			ID:   1,
 			Chat: models.Chat{ID: -1001},
-			Text: "!sa AAPL",
+			Text: testStockCommand,
 		},
 	}
 
@@ -1076,5 +1078,320 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 	}
 	if !strings.Contains(srv.lastMessage, "AAPL") {
 		t.Fatalf("expected analysis containing AAPL, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_FinnhubFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
+		timeout:   1 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Failed to fetch stock data") {
+		t.Fatalf("expected Finnhub error message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_ExaFailure(t *testing.T) {
+	mockQuote := StockQuote{CurrentPrice: 150.0}
+	mockProfile := CompanyProfile{Name: testProfileName}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/quote":
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case "/api/v1/stock/profile2":
+			_ = json.NewEncoder(w).Encode(mockProfile)
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
+	t.Setenv("EXA_API_KEY", "exa-key")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
+		timeout:   1 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Failed to fetch news") {
+		t.Fatalf("expected Exa error message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_GeminiTimeout(t *testing.T) {
+	mockQuote := StockQuote{CurrentPrice: 150.0}
+	mockProfile := CompanyProfile{Name: testProfileName}
+	mockExaResp := exaSearchResponse{RequestID: "req", Results: []exaSearchResult{}}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/quote":
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case "/api/v1/stock/profile2":
+			_ = json.NewEncoder(w).Encode(mockProfile)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
+	t.Setenv("EXA_API_KEY", "exa-key")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{err: context.DeadlineExceeded},
+		timeout:   100 * time.Millisecond,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "timed out") {
+		t.Fatalf("expected timeout message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_GeminiBlocked(t *testing.T) {
+	mockQuote := StockQuote{CurrentPrice: 150.0}
+	mockProfile := CompanyProfile{Name: testProfileName}
+	mockExaResp := exaSearchResponse{RequestID: "req", Results: []exaSearchResult{}}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/quote":
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case "/api/v1/stock/profile2":
+			_ = json.NewEncoder(w).Encode(mockProfile)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer server.Close()
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
+	t.Setenv("EXA_API_KEY", "exa-key")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+					BlockReason: genai.BlockedReasonSafety,
+				},
+			},
+		},
+		timeout: 30 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "unavailable") {
+		t.Fatalf("expected unavailable message, got %q", srv.lastMessage)
+	}
+}
+
+func TestAllowAnalysisRequest_NilMessage(t *testing.T) {
+	allowed, dur := allowAnalysisRequest(nil)
+	if allowed {
+		t.Fatal("expected false for nil message")
+	}
+	if dur != 0 {
+		t.Fatalf("expected zero duration for nil message, got %v", dur)
+	}
+}
+
+func TestAllowAnalysisRequest_NilFrom(t *testing.T) {
+	prev := analysisLimiter
+	analysisLimiter = newMemoryRateLimiter(1, time.Minute)
+	defer func() { analysisLimiter = prev }()
+
+	msg := &models.Message{
+		Chat: models.Chat{ID: -1001},
+		From: nil,
+	}
+
+	allowed, _ := allowAnalysisRequest(msg)
+	if !allowed {
+		t.Fatal("expected pass for message with nil From (per-chat bucket)")
+	}
+}
+
+func TestLoadAnalysisRateLimiter_InvalidValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		countEnv   string
+		windowEnv  string
+		wantLimit  int
+		wantWindow time.Duration
+	}{
+		{"non-numeric count", "abc", "", defaultAnalysisRateLimitCount, defaultAnalysisRateLimitWindow * time.Second},
+		{"negative count", "-5", "", defaultAnalysisRateLimitCount, defaultAnalysisRateLimitWindow * time.Second},
+		{"zero count", "0", "", defaultAnalysisRateLimitCount, defaultAnalysisRateLimitWindow * time.Second},
+		{"non-numeric window", "", "xyz", defaultAnalysisRateLimitCount, defaultAnalysisRateLimitWindow * time.Second},
+		{"negative window", "", "-10", defaultAnalysisRateLimitCount, defaultAnalysisRateLimitWindow * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("STOCK_ANALYSIS_RATE_LIMIT_COUNT", tt.countEnv)
+			t.Setenv("STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS", tt.windowEnv)
+
+			rl := loadAnalysisRateLimiter()
+			if rl.limit != tt.wantLimit {
+				t.Fatalf("limit: got %d, want %d", rl.limit, tt.wantLimit)
+			}
+			if rl.window != tt.wantWindow {
+				t.Fatalf("window: got %v, want %v", rl.window, tt.wantWindow)
+			}
+		})
+	}
+}
+
+func TestInitStockAnalyzer_DisabledByDefault(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when disabled")
+	}
+}
+
+func TestInitStockAnalyzer_DisabledExplicitly(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "false")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when STOCK_ANALYSIS_ENABLED=false")
+	}
+}
+
+func TestInitStockAnalyzer_DisabledMissingGemini(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "true")
+	t.Setenv("GEMINI_API_KEY", "")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when GEMINI_API_KEY is missing")
+	}
+}
+
+func TestInitStockAnalyzer_DisabledMissingExa(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "true")
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("EXA_API_KEY", "")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when EXA_API_KEY is missing")
+	}
+}
+
+func TestInitStockAnalyzer_DisabledMissingFinnhub(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "true")
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("EXA_API_KEY", "test-key")
+	t.Setenv("FINNHUB_API_KEY", "")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when FINNHUB_API_KEY is missing")
+	}
+}
+
+func TestInitStockAnalyzer_DisabledInvalidTimeout(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_ENABLED", "true")
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("EXA_API_KEY", "test-key")
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+	t.Setenv("STOCK_ANALYSIS_TIMEOUT_SECONDS", "not-a-number")
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = nil }()
+
+	initStockAnalyzer()
+
+	if stockAnalyzerInstance != nil {
+		t.Fatal("expected stockAnalyzerInstance to be nil when timeout is invalid")
 	}
 }

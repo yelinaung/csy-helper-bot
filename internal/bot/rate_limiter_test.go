@@ -160,3 +160,43 @@ func TestMemoryRateLimiter_Sweep(t *testing.T) {
 		t.Fatalf("expected sweep to reduce map size below %d, got %d", rateLimitMaxMapSize, mapLen)
 	}
 }
+
+func TestMemoryRateLimiter_Sweep_Partial(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	now := time.Now()
+
+	expiredKey := "user:expired"
+	activeKey := "user:active"
+
+	expiredStart := now.Add(-2 * rl.window)
+	activeStart := now
+
+	// Seed one expired and one active entry.
+	ok, _ := rl.allow(expiredKey, expiredStart)
+	if !ok {
+		t.Fatal("first request for expiredKey should pass")
+	}
+	ok, _ = rl.allow(activeKey, activeStart)
+	if !ok {
+		t.Fatal("first request for activeKey should pass")
+	}
+
+	// Sweep at a point where expiredKey is expired but activeKey still
+	// within its window.
+	sweepTime := activeStart.Add(rl.window / 2)
+	rl.mu.Lock()
+	rl.sweepLocked(sweepTime)
+	rl.mu.Unlock()
+
+	// Expired entry should be gone — a fresh request for it passes again.
+	ok, _ = rl.allow(expiredKey, sweepTime)
+	if !ok {
+		t.Fatal("expiredKey should have been removed and allowed again after sweep")
+	}
+
+	// Active entry (limit=1) should still block a second request.
+	ok, _ = rl.allow(activeKey, sweepTime)
+	if ok {
+		t.Fatal("activeKey should still be rate-limited after sweep")
+	}
+}

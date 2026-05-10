@@ -180,7 +180,7 @@ func TestBuildStockSearchQuery(t *testing.T) {
 			name:   "with profile name",
 			symbol: testSymbolAAPL,
 			profile: &CompanyProfile{
-				Name: "Apple Inc",
+				Name: testProfileName,
 			},
 			want: "Apple Inc (AAPL) stock latest news earnings financial performance",
 		},

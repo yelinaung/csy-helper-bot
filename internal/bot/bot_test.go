@@ -19,6 +19,8 @@ import (
 const (
 	testSymbolAAPL      = "AAPL"
 	testErrInvalidUsage = "invalid usage"
+	testProfileName     = "Apple Inc"
+	testStockCommand    = "!sa AAPL"
 )
 
 type rewriteHostTransport struct {
@@ -255,7 +257,7 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 		PreviousClose: 147.75,
 	}
 	profile := &CompanyProfile{
-		Name:                 "Apple Inc",
+		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
 		Industry:             "Technology",
 	}
@@ -265,7 +267,7 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 	if !strings.Contains(msg, testSymbolAAPL) {
 		t.Error("message should contain symbol")
 	}
-	if !strings.Contains(msg, "Apple Inc") {
+	if !strings.Contains(msg, testProfileName) {
 		t.Error("message should contain company name")
 	}
 	if !strings.Contains(msg, "🟢") {
@@ -408,7 +410,7 @@ func TestFetchStockQuote_SymbolNotFound(t *testing.T) {
 
 func TestFetchCompanyProfile(t *testing.T) {
 	mockProfile := CompanyProfile{
-		Name:                 "Apple Inc",
+		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
 		Industry:             "Technology",
 		Exchange:             "NASDAQ",
@@ -431,7 +433,7 @@ func TestFetchCompanyProfile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if result.Name != "Apple Inc" {
+	if result.Name != testProfileName {
 		t.Errorf("expected name 'Apple Inc', got '%s'", result.Name)
 	}
 	if result.Industry != "Technology" {

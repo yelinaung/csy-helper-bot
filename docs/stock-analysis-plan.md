@@ -712,7 +712,7 @@ All tests use `t.Setenv("EXA_API_KEY", "test-key")` to avoid state leakage.
 
 ### 4. `internal/bot/stock_analysis_test.go`
 
-All tests use `t.Setenv` / `t.Setenv` for env-dependent paths. Env vars unique
+All tests use `t.Setenv` for env-dependent paths. Env vars unique
 to each test to prevent cross-test leakage.
 
 | Test | Description |

@@ -210,9 +210,6 @@ func (g *geminiExplainer) explainWithLanguage(ctx context.Context, text string, 
 	if out == "" {
 		finishReason := firstCandidateFinishReason(resp)
 		logEmptyGeminiResponse(resp, finishReason)
-		if finishReason == genai.FinishReasonStop {
-			return "", ErrExplainBlocked
-		}
 		return "", errors.New("empty explanation from Gemini")
 	}
 

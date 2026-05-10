@@ -442,7 +442,7 @@ func loadAnalysisRateLimiter() *memoryRateLimiter {
 	return newMemoryRateLimiter(limit, window)
 }
 
-func allowAnalysisRequest(message *models.Message) (bool, time.Duration) { //nolint:unparam // mirrors allowExplainRequest pattern
+func allowAnalysisRequest(message *models.Message) (bool, time.Duration) {
 	if message == nil {
 		return false, 0
 	}

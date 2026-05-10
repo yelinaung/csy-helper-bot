@@ -25,7 +25,7 @@ const (
 	analysisTimeoutMsg            = "Analysis timed out for %s. Please try again."
 	analysisUnavailableMsg        = "Analysis unavailable for %s."
 	analysisFailedMsg             = "Failed to analyze %s. Please try again later."
-	analysisRateLimitMsg          = "Rate limit reached for stock analysis. Please try again shortly."
+	analysisRateLimitMsg          = "Rate limit reached for stock analysis. Try again in %s."
 	analysisNoNewsNote            = "No recent web news found for this search."
 	maxAnalysisResponseRuneLength = 3500
 	defaultAnalysisTimeoutSec     = 90
@@ -115,12 +115,8 @@ func parseStockAnalysisCommand(text string) (string, error) {
 }
 
 func isKnownRangeToken(token string) bool {
-	switch strings.ToLower(token) {
-	case "7d", "30d", "60d", "90d":
-		return true
-	default:
-		return false
-	}
+	_, ok := stockRangeDays[strings.ToLower(token)]
+	return ok
 }
 
 func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error) {
@@ -242,17 +238,10 @@ func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error
 		return "", fmt.Errorf("marshal analysis prompt payload: %w", err)
 	}
 
-	// Truncate news items from the end if payload exceeds budget.
-	for i := len(payload.NewsItems); runeLen(string(payloadJSON)) > maxPromptTotalRuneLen; i-- {
-		if i == 0 {
-			payload.NewsItems = nil
-			payloadJSON, err = json.MarshalIndent(payload, "", "  ")
-			if err != nil {
-				return "", fmt.Errorf("marshal analysis prompt payload: %w", err)
-			}
-			break
-		}
-		payload.NewsItems = payload.NewsItems[:i-1]
+	// Drop news items from the tail while the serialized payload exceeds
+	// the total prompt budget.
+	for len(payload.NewsItems) > 0 && runeLen(string(payloadJSON)) > maxPromptTotalRuneLen {
+		payload.NewsItems = payload.NewsItems[:len(payload.NewsItems)-1]
 		payloadJSON, err = json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return "", fmt.Errorf("marshal analysis prompt payload: %w", err)
@@ -380,10 +369,6 @@ func sendOrEditAnalysisResult(
 
 	formatted := formatTelegramMarkdown(text)
 
-	if runeLen(formatted) > 4000 {
-		formatted = truncateRunes(formatted, 4000)
-	}
-
 	if loadingErr == nil && loadingMsg != nil {
 		_, editErr := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    update.Message.Chat.ID,
@@ -454,11 +439,12 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 		return
 	}
 
-	if msg, blocked := blockedStockResponse(symbol); blocked {
+	allowed, retryAfter := allowAnalysisRequest(update.Message)
+	if !allowed {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            msg,
+			Text:            fmt.Sprintf(analysisRateLimitMsg, retryAfter.Round(time.Second)),
 			ReplyParameters: &models.ReplyParameters{
 				MessageID:                update.Message.ID,
 				AllowSendingWithoutReply: true,
@@ -467,12 +453,11 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 		return
 	}
 
-	allowed, _ := allowAnalysisRequest(update.Message)
-	if !allowed {
+	if msg, blocked := blockedStockResponse(symbol); blocked {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            analysisRateLimitMsg,
+			Text:            msg,
 			ReplyParameters: &models.ReplyParameters{
 				MessageID:                update.Message.ID,
 				AllowSendingWithoutReply: true,

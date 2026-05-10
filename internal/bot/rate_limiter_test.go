@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -126,4 +127,36 @@ func TestGetenvTrim(t *testing.T) {
 			t.Fatalf("expected %q, got %q", "world", got)
 		}
 	})
+}
+
+func TestMemoryRateLimiter_Sweep(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	now := time.Now()
+
+	// Populate with expired entries.
+	for i := range rateLimitMaxMapSize + 100 {
+		key := fmt.Sprintf("user:%d", i)
+		ok, _ := rl.allow(key, now)
+		if !ok {
+			t.Fatalf("first request for key %d should pass", i)
+		}
+	}
+
+	// Move time forward past the window so all entries are expired.
+	future := now.Add(20 * time.Second)
+
+	// One more request should trigger the sweep.
+	ok, _ := rl.allow("newuser:1", future)
+	if !ok {
+		t.Fatal("request with a fresh key should pass")
+	}
+
+	// After sweep, the map should be much smaller.
+	rl.mu.Lock()
+	mapLen := len(rl.data)
+	rl.mu.Unlock()
+
+	if mapLen >= rateLimitMaxMapSize {
+		t.Fatalf("expected sweep to reduce map size below %d, got %d", rateLimitMaxMapSize, mapLen)
+	}
 }

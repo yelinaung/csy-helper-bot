@@ -97,16 +97,15 @@ func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile
 		return nil, fmt.Errorf("marshal exa search request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.exa.ai/search", bytes.NewReader(bodyBytes))
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(timeoutCtx, "POST", "https://api.exa.ai/search", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create exa request: %w", err)
 	}
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	req = req.WithContext(timeoutCtx)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

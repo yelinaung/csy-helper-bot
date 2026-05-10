@@ -34,6 +34,15 @@ var (
 
 var errDatabentoAPIKeyNotConfigured = errors.New("databento api key not configured")
 
+// stockRangeDays maps range tokens to day counts for both !s and !sa
+// commands.
+var stockRangeDays = map[string]int{
+	"7d":  7,
+	"30d": 30,
+	"60d": 60,
+	"90d": 90,
+}
+
 type httpStatusError struct {
 	StatusCode int
 	Status     string
@@ -313,21 +322,13 @@ func parseStockCommand(text string) (string, int, error) {
 		return symbol, 0, nil
 	}
 
-	switch strings.ToLower(parts[1]) {
-	case "7d":
-		return symbol, 7, nil
-	case "30d":
-		return symbol, 30, nil
-	case "60d":
-		return symbol, 60, nil
-	case "90d":
-		return symbol, 90, nil
-	default:
-		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
-			return "", 0, errors.New("invalid range, use 7d, 30d, 60d or 90d (e.g., !s AAPL 7d)")
-		}
-		return "", 0, errors.New(invalidUsageSymbol)
+	if days, ok := stockRangeDays[strings.ToLower(parts[1])]; ok {
+		return symbol, days, nil
 	}
+	if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
+		return "", 0, errors.New("invalid range, use 7d, 30d, 60d or 90d (e.g., !s AAPL 7d)")
+	}
+	return "", 0, errors.New(invalidUsageSymbol)
 }
 
 func blockedStockResponse(symbol string) (string, bool) {

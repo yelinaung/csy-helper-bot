@@ -19,12 +19,14 @@ import (
 )
 
 var (
-	httpClient     = &http.Client{Timeout: 10 * time.Second}
-	textExplainer  *geminiExplainer
-	explainLimiter *memoryRateLimiter
-	botMention     string
-	botUserID      int64
-	allowedGroups  map[int64]struct{}
+	httpClient            = &http.Client{Timeout: 10 * time.Second}
+	textExplainer         *geminiExplainer
+	explainLimiter        *memoryRateLimiter
+	stockAnalyzerInstance *stockAnalyzer
+	analysisLimiter       *memoryRateLimiter
+	botMention            string
+	botUserID             int64
+	allowedGroups         map[int64]struct{}
 )
 
 const (
@@ -67,6 +69,8 @@ func Run() error {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler, requestLoggingMiddleware)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler, requestLoggingMiddleware)
 	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa", bot.MatchTypeExact, stockAnalysisHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa ", bot.MatchTypePrefix, stockAnalysisHandler, requestLoggingMiddleware)
 
 	me, err := b.GetMe(ctx)
 	if err != nil {
@@ -103,6 +107,9 @@ func Run() error {
 			Msg("Gemini explainer initialized")
 	}
 	explainLimiter = loadExplainRateLimiter()
+
+	initStockAnalyzer()
+	analysisLimiter = loadAnalysisRateLimiter()
 
 	go startHealthServer()
 	go startAllowedGroupsReporter(ctx)
@@ -360,6 +367,7 @@ func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 /lc - Get today's LeetCode daily challenge
 !s SYMBOL - Get stock price (e.g., !s AAPL)
 !s SYMBOL 7d|30d|60d|90d - Get historical chart image (e.g., !s AAPL 7d)
+!sa SYMBOL - AI-generated stock analysis, not financial advice (e.g., !sa AAPL)
 Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPrefix(botMention, "@"))
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -367,4 +375,86 @@ Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPre
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            helpText,
 	})
+}
+
+// initStockAnalyzer initializes the stock analyzer when all required
+// environment variables are configured. This is the sole gate for the
+// !sa feature — no separate env check is needed in Run().
+func initStockAnalyzer() {
+	enabled := strings.ToLower(strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_ENABLED")))
+	if enabled != "true" && enabled != "1" {
+		log.Info().Msg("Stock analysis disabled (STOCK_ANALYSIS_ENABLED not set to true/1)")
+		return
+	}
+
+	geminiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	if geminiKey == "" {
+		log.Warn().Msg("Stock analysis disabled: GEMINI_API_KEY not configured")
+		return
+	}
+
+	exaKey := strings.TrimSpace(os.Getenv("EXA_API_KEY"))
+	if exaKey == "" {
+		log.Warn().Msg("Stock analysis disabled: EXA_API_KEY not configured")
+		return
+	}
+
+	model := strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_MODEL"))
+	if model == "" {
+		model = defaultGeminiModelName
+	}
+	timeout, err := loadAnalysisTimeout()
+	if err != nil {
+		log.Error().Err(err).Msg("Stock analysis disabled: invalid STOCK_ANALYSIS_TIMEOUT_SECONDS")
+		return
+	}
+
+	analyzer, err := newStockAnalyzer(context.Background(), geminiKey, model, timeout)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to initialize stock analyzer")
+		return
+	}
+	stockAnalyzerInstance = analyzer
+	log.Info().Str("model", model).Dur("timeout", timeout).Msg("Stock analyzer initialized")
+}
+
+const (
+	defaultAnalysisRateLimitCount  = 5
+	defaultAnalysisRateLimitWindow = 300 // seconds
+)
+
+func loadAnalysisRateLimiter() *memoryRateLimiter {
+	limit := defaultAnalysisRateLimitCount
+	window := time.Duration(defaultAnalysisRateLimitWindow) * time.Second
+
+	if raw := getenvTrim("STOCK_ANALYSIS_RATE_LIMIT_COUNT"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	if raw := getenvTrim("STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			window = time.Duration(n) * time.Second
+		}
+	}
+
+	return newMemoryRateLimiter(limit, window)
+}
+
+func allowAnalysisRequest(message *models.Message) (bool, time.Duration) { //nolint:unparam // mirrors allowExplainRequest pattern
+	if message == nil {
+		return false, 0
+	}
+	if analysisLimiter == nil {
+		return true, 0
+	}
+
+	var userID int64
+	if message.From != nil {
+		userID = message.From.ID
+	}
+
+	key := buildExplainRateKey(message.Chat.ID, userID)
+	return analysisLimiter.allow(key, time.Now())
 }

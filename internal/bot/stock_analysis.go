@@ -123,7 +123,7 @@ func isKnownRangeToken(token string) bool {
 	}
 }
 
-func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error) { //nolint:unparam // timeout is configurable via env in production
+func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("gemini API key is required")
 	}
@@ -368,8 +368,6 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 
 // sendOrEditAnalysisResult edits the loading message with analysis
 // output. Uses MarkdownV2 formatting with a plaintext fallback.
-//
-//nolint:unused // Called by stockAnalysisHandler in Step 3.
 func sendOrEditAnalysisResult(
 	ctx context.Context,
 	b *bot.Bot,
@@ -432,4 +430,116 @@ func sendOrEditAnalysisResult(
 			AllowSendingWithoutReply: true,
 		},
 	})
+}
+
+// stockAnalysisHandler handles !sa commands by fetching market data,
+// news, and generating AI-powered stock analysis.
+func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	symbol, err := parseStockAnalysisCommand(update.Message.Text)
+	if err != nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            err.Error(),
+		})
+		return
+	}
+
+	if stockAnalyzerInstance == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            analysisNotConfiguredMsg,
+		})
+		return
+	}
+
+	if msg, blocked := blockedStockResponse(symbol); blocked {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            msg,
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
+
+	allowed, _ := allowAnalysisRequest(update.Message)
+	if !allowed {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            analysisRateLimitMsg,
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
+
+	loadingText := fmt.Sprintf("Analyzing data for %s...", symbol)
+	loadingMsg, loadingErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            loadingText,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if loadingErr != nil {
+		log.Warn().Err(loadingErr).Str("symbol", symbol).Msg("Failed to send analysis loading message")
+	}
+
+	quote, err := fetchStockQuote(ctx, symbol)
+	if err != nil {
+		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote for analysis")
+		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr,
+			fmt.Sprintf(analysisFinnhubErrorMsg, symbol))
+		return
+	}
+
+	profile, profileErr := fetchCompanyProfile(ctx, symbol)
+	if profileErr != nil {
+		log.Warn().Err(profileErr).Str("symbol", symbol).Msg("Failed to fetch company profile for analysis")
+	}
+
+	exaResults, err := searchStockNews(ctx, symbol, profile)
+	if err != nil {
+		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch news for analysis")
+		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr,
+			fmt.Sprintf(analysisExaErrorMsg, symbol))
+		return
+	}
+
+	highlights := exaResultsToHighlights(exaResults)
+
+	input := &stockAnalysisInput{
+		Symbol:    symbol,
+		Quote:     quote,
+		Profile:   profile,
+		NewsItems: highlights,
+	}
+
+	analysis, err := stockAnalyzerInstance.analyze(ctx, input)
+	if err != nil {
+		log.Error().Err(err).Str("symbol", symbol).Msg("Stock analysis failed")
+
+		errText := fmt.Sprintf(analysisFailedMsg, symbol)
+		if errors.Is(err, ErrExplainTimeout) {
+			errText = fmt.Sprintf(analysisTimeoutMsg, symbol)
+		}
+		if errors.Is(err, ErrExplainBlocked) {
+			errText = fmt.Sprintf(analysisUnavailableMsg, symbol)
+		}
+
+		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, errText)
+		return
+	}
+
+	sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, analysis)
 }

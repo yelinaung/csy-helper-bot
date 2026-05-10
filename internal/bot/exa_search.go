@@ -65,8 +65,6 @@ type cachedExaResults struct {
 // searchStockNews queries the Exa API for recent news about a stock and
 // returns sanitized results. Results are cached for exaCacheTTL. The
 // EXA_API_KEY environment variable must be set.
-//
-//nolint:unparam // profile is used by the stock analysis handler.
 func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile) ([]exaSearchResult, error) {
 	apiKey := strings.TrimSpace(os.Getenv("EXA_API_KEY"))
 	if apiKey == "" {

@@ -772,14 +772,29 @@ func TestStockAnalysisHandler_RateLimitKey(t *testing.T) {
 
 // testBotServer captures Telegram API calls for handler testing.
 type testBotServer struct {
-	mu          sync.Mutex
-	requestLog  []string // method names captured from URL paths
-	lastMessage string   // text captured from last sendMessage/editMessageText
+	mu           sync.Mutex
+	requestLog   []string // method names captured from URL paths
+	lastMessage  string   // text captured from last sendMessage/editMessageText
+	failNextEdit bool     // return error on next editMessageText call
 }
 
 func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requestLog = append(s.requestLog, r.URL.Path)
+	fail := s.failNextEdit && strings.Contains(r.URL.Path, "editMessageText")
+	s.failNextEdit = false
+	s.mu.Unlock()
+
+	if fail {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          false,
+			"description": "bad request: can't parse entities",
+		})
+		return
+	}
+
+	s.mu.Lock()
 	// Capture text from multipart form when present. No error-propagation
 	// on parse failure — best-effort capture only.
 	const maxFormSize = 1 << 20
@@ -1393,5 +1408,78 @@ func TestInitStockAnalyzer_DisabledInvalidTimeout(t *testing.T) {
 
 	if stockAnalyzerInstance != nil {
 		t.Fatal("expected stockAnalyzerInstance to be nil when timeout is invalid")
+	}
+}
+
+func TestAnalyze_GeneratesDifferentNoncesPerCall(t *testing.T) {
+	gen := &capturingGenerator{}
+	analyzer := &stockAnalyzer{
+		generator: gen,
+		model:     "test-model",
+		timeout:   30 * time.Second,
+	}
+
+	input := &stockAnalysisInput{
+		Symbol: "AAPL",
+		Quote:  &StockQuote{CurrentPrice: 150.00},
+	}
+
+	_, err := analyzer.analyze(context.Background(), input)
+	if err != nil {
+		t.Fatalf("first analyze call failed: %v", err)
+	}
+	firstPrompt := gen.capturedContents[0].Parts[0].Text
+
+	// CapturingGenerator returns a Response with text "explanation" always.
+	// The analyze method returns resp.Text() which is "explanation", so it
+	// passes the empty-text check. After first call, reuse the same generator.
+	gen = &capturingGenerator{}
+	analyzer.generator = gen
+
+	_, err = analyzer.analyze(context.Background(), input)
+	if err != nil {
+		t.Fatalf("second analyze call failed: %v", err)
+	}
+	secondPrompt := gen.capturedContents[0].Parts[0].Text
+
+	if firstPrompt == secondPrompt {
+		t.Fatal("expected different prompts (different nonces) on each analyze call")
+	}
+}
+
+func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
+	// Create a bot server that rejects the first edit to trigger fallback.
+	srv := &testBotServer{failNextEdit: true}
+	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	defer server.Close()
+
+	opts := []bot.Option{
+		bot.WithServerURL(server.URL),
+		bot.WithSkipGetMe(),
+	}
+	b, err := bot.New("dummy:test-token", opts...)
+	if err != nil {
+		t.Fatalf("create test bot: %v", err)
+	}
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+	loadingMsg := &models.Message{ID: 99}
+
+	// First call: editMessageText returns error (failNextEdit=true), so
+	// we fall back to a plaintext edit.
+	sendOrEditAnalysisResult(context.Background(), b, update, loadingMsg, nil, "test")
+	if srv.requestCount() < 2 {
+		t.Fatalf("expected at least 2 API calls (failed edit + fallback), got %d", srv.requestCount())
+	}
+
+	// Verify the fallback edit was plaintext (no parse mode).
+	// The testBotServer captures the text sent; it should be the raw "test".
+	if srv.lastMessage != "test" {
+		t.Fatalf("expected plaintext fallback 'test', got %q", srv.lastMessage)
 	}
 }

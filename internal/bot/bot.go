@@ -399,6 +399,12 @@ func initStockAnalyzer() {
 		return
 	}
 
+	finnhubKey := strings.TrimSpace(os.Getenv("FINNHUB_API_KEY"))
+	if finnhubKey == "" {
+		log.Warn().Msg("Stock analysis disabled: FINNHUB_API_KEY not configured")
+		return
+	}
+
 	model := strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_MODEL"))
 	if model == "" {
 		model = defaultGeminiModelName

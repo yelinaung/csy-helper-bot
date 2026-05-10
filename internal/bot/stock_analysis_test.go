@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"google.golang.org/genai"
 )
@@ -763,5 +767,314 @@ func TestStockAnalysisHandler_RateLimitKey(t *testing.T) {
 	key := buildExplainRateKey(msg.Chat.ID, msg.From.ID)
 	if key != "chat:-1001:user:77" {
 		t.Fatalf("expected rate key 'chat:-1001:user:77', got %q", key)
+	}
+}
+
+// testBotServer captures Telegram API calls for handler testing.
+type testBotServer struct {
+	mu          sync.Mutex
+	requestLog  []string // method names captured from URL paths
+	lastMessage string   // text captured from last sendMessage/editMessageText
+}
+
+func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.requestLog = append(s.requestLog, r.URL.Path)
+	// Capture text from multipart form when present. No error-propagation
+	// on parse failure — best-effort capture only.
+	if err := r.ParseMultipartForm(1 << 20); err == nil { //nolint:gosec // 1MB limit is sufficient for test messages
+		if txt := r.FormValue("text"); txt != "" {
+			s.lastMessage = txt
+		}
+	}
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok": true,
+		"result": map[string]any{
+			"message_id": 1,
+			"chat":       map[string]any{"id": -1001, "type": "group"},
+			"date":       1234567890,
+		},
+	})
+}
+
+func (s *testBotServer) lastMethod() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.requestLog) == 0 {
+		return ""
+	}
+	return s.requestLog[len(s.requestLog)-1]
+}
+
+func (s *testBotServer) requestCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.requestLog)
+}
+
+func newTestBot(t *testing.T) (*bot.Bot, *testBotServer) {
+	t.Helper()
+	srv := &testBotServer{}
+	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	t.Cleanup(server.Close)
+
+	opts := []bot.Option{
+		bot.WithServerURL(server.URL),
+		bot.WithSkipGetMe(),
+	}
+	b, err := bot.New("dummy:test-token", opts...)
+	if err != nil {
+		t.Fatalf("create test bot: %v", err)
+	}
+	return b, srv
+}
+
+func TestStockAnalysisHandler_ParseError(t *testing.T) {
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: "!sa",
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if srv.requestCount() < 1 {
+		t.Fatal("expected at least one API call")
+	}
+	if !strings.Contains(srv.lastMessage, "please provide") {
+		t.Fatalf("expected parse-error message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_AnalyzerNil(t *testing.T) {
+	b, srv := newTestBot(t)
+
+	prev := stockAnalyzerInstance
+	stockAnalyzerInstance = nil
+	defer func() { stockAnalyzerInstance = prev }()
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: "!sa AAPL",
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "not configured") {
+		t.Fatalf("expected not-configured message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_Blocked(t *testing.T) {
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{},
+		},
+		timeout: 1 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	origBlocked := blockedStocks
+	blockedStocks = map[string]string{"TEAM": "Please.. no.. don't"}
+	defer func() { blockedStocks = origBlocked }()
+
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: "!sa TEAM",
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Please.. no.. don't") {
+		t.Fatalf("expected blocked message, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_RateLimited(t *testing.T) {
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{},
+		},
+		timeout: 1 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	prevLimiter := analysisLimiter
+	limiter := newMemoryRateLimiter(1, time.Minute)
+	// Pre-fill so the next request is rejected.
+	limiter.allow("chat:-1001:user:77", time.Now())
+	analysisLimiter = limiter
+	defer func() { analysisLimiter = prevLimiter }()
+
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			From: &models.User{ID: 77},
+			Text: "!sa AAPL",
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Rate limit reached") {
+		t.Fatalf("expected rate-limit message, got %q", srv.lastMessage)
+	}
+}
+
+func TestSendOrEditAnalysisResult_Truncation(t *testing.T) {
+	// Verify text truncation in sendOrEditAnalysisResult before formatting.
+	// We test the behaviour by calling the function and checking the bot
+	// receives truncated text. MarkdownV2 edit will fail since the mock
+	// bot server returns success on all calls, but the truncation is
+	// applied before formatting so the fallback path still gets truncated
+	// plain text.
+	b, srv := newTestBot(t)
+
+	longText := strings.Repeat("x", maxAnalysisResponseRuneLength+200)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+
+	sendOrEditAnalysisResult(context.Background(), b, update, nil, nil, longText)
+
+	// The text should be truncated to maxAnalysisResponseRuneLength.
+	got := srv.lastMessage
+	if runeLen(got) > maxAnalysisResponseRuneLength {
+		t.Fatalf("expected text truncated to %d runes, got %d in %q",
+			maxAnalysisResponseRuneLength, runeLen(got), got)
+	}
+}
+
+func TestSendOrEditAnalysisResult_EditSuccess(t *testing.T) {
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+
+	loadingMsg := &models.Message{ID: 99}
+
+	sendOrEditAnalysisResult(context.Background(), b, update, loadingMsg, nil, "Test analysis result")
+
+	// When loadingMsg is provided and edit succeeds, EditMessageText is
+	// called. The mock server returns success for all methods.
+	lastMethod := srv.lastMethod()
+	if !strings.Contains(lastMethod, "editMessageText") {
+		t.Fatalf("expected editMessageText call, got %q", lastMethod)
+	}
+}
+
+func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
+	// Set up mock HTTP server for Finnhub and Exa.
+	mockQuote := StockQuote{
+		CurrentPrice:  150.25,
+		Change:        2.50,
+		PercentChange: 1.69,
+		High:          151.00,
+		Low:           148.50,
+		Open:          149.00,
+		PreviousClose: 147.75,
+	}
+	mockProfile := CompanyProfile{
+		Name:                 "Apple Inc",
+		MarketCapitalization: 3000000,
+		Industry:             "Technology",
+		Exchange:             "NASDAQ",
+	}
+	mockExaResp := exaSearchResponse{
+		RequestID: "req-test",
+		Results: []exaSearchResult{
+			{
+				Title:         "Apple Q2 Results",
+				URL:           "https://example.com",
+				PublishedDate: "2026-05-01",
+				Highlights:    []string{"Apple reported record revenue."},
+			},
+		},
+	}
+	mockExaResp.CostDollars.Total = 0.005
+
+	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/quote":
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case "/stock/profile2":
+			_ = json.NewEncoder(w).Encode(mockProfile)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer dispatchServer.Close()
+	useRedirectedHTTPClient(t, dispatchServer.URL)
+
+	t.Setenv("FINNHUB_API_KEY", "test-finnhub-key")
+	t.Setenv("EXA_API_KEY", "test-exa-key")
+
+	// Set up mock Gemini.
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{Content: &genai.Content{Parts: []*genai.Part{{Text: "**AAPL** analysis result"}}}},
+				},
+			},
+		},
+		timeout: 30 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	// Reset the Exa cache so this test doesn't hit stale data.
+	resetExaCacheForTest(t)
+
+	// Create the test bot.
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: "!sa AAPL",
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	// The handler should first send a loading message, then edit it with
+	// the analysis. The edit path succeeds on our mock server, so the
+	// last method should be editMessageText.
+	lastMethod := srv.lastMethod()
+	if !strings.Contains(lastMethod, "editMessageText") {
+		t.Fatalf("expected editMessageText as last method, got %q", lastMethod)
+	}
+	if !strings.Contains(srv.lastMessage, "AAPL") {
+		t.Fatalf("expected analysis containing AAPL, got %q", srv.lastMessage)
 	}
 }

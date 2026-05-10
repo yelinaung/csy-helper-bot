@@ -50,14 +50,15 @@ func (r *memoryRateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Opportunistically sweep expired entries when the map grows large
-	// enough to suggest a long-running deployment with many unique keys.
-	if len(r.data) > rateLimitMaxMapSize {
-		r.sweepLocked(now)
-	}
-
 	entry, ok := r.data[key]
 	if !ok || now.Sub(entry.windowStart) >= r.window {
+		// Only sweep when inserting a new key and the map is at capacity.
+		if !ok && len(r.data) >= rateLimitMaxMapSize {
+			r.sweepLocked(now)
+			if len(r.data) >= rateLimitMaxMapSize {
+				return false, r.window
+			}
+		}
 		r.data[key] = rateEntry{windowStart: now, count: 1}
 		return true, 0
 	}

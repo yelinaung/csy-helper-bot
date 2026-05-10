@@ -345,9 +345,6 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	if out == "" {
 		finishReason := firstCandidateFinishReason(resp)
 		logEmptyGeminiResponse(resp, finishReason)
-		if finishReason == genai.FinishReasonStop {
-			return "", ErrExplainBlocked
-		}
 		return "", errors.New("empty analysis from Gemini")
 	}
 
@@ -450,12 +447,11 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 		return
 	}
 
-	allowed, retryAfter := allowAnalysisRequest(update.Message)
-	if !allowed {
+	if msg, blocked := blockedStockResponse(symbol); blocked {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            fmt.Sprintf(analysisRateLimitMsg, retryAfter.Round(time.Second)),
+			Text:            msg,
 			ReplyParameters: &models.ReplyParameters{
 				MessageID:                update.Message.ID,
 				AllowSendingWithoutReply: true,
@@ -464,11 +460,12 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 		return
 	}
 
-	if msg, blocked := blockedStockResponse(symbol); blocked {
+	allowed, retryAfter := allowAnalysisRequest(update.Message)
+	if !allowed {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text:            msg,
+			Text:            fmt.Sprintf(analysisRateLimitMsg, retryAfter.Round(time.Second)),
 			ReplyParameters: &models.ReplyParameters{
 				MessageID:                update.Message.ID,
 				AllowSendingWithoutReply: true,

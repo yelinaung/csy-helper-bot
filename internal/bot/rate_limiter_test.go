@@ -133,8 +133,8 @@ func TestMemoryRateLimiter_Sweep(t *testing.T) {
 	rl := newMemoryRateLimiter(1, 10*time.Second)
 	now := time.Now()
 
-	// Populate with expired entries.
-	for i := range rateLimitMaxMapSize + 100 {
+	// Fill the map to capacity through allow().
+	for i := range rateLimitMaxMapSize {
 		key := fmt.Sprintf("user:%d", i)
 		ok, _ := rl.allow(key, now)
 		if !ok {
@@ -142,13 +142,19 @@ func TestMemoryRateLimiter_Sweep(t *testing.T) {
 		}
 	}
 
+	// All entries are at capacity — new keys are rejected.
+	ok, _ := rl.allow("overflow:1", now)
+	if ok {
+		t.Fatal("expected overflow key to be rejected at capacity")
+	}
+
 	// Move time forward past the window so all entries are expired.
 	future := now.Add(20 * time.Second)
 
-	// One more request should trigger the sweep.
-	ok, _ := rl.allow("newuser:1", future)
+	// One more request should trigger the sweep, freeing space.
+	ok, _ = rl.allow("newuser:1", future)
 	if !ok {
-		t.Fatal("request with a fresh key should pass")
+		t.Fatal("request with a fresh key should pass after sweep")
 	}
 
 	// After sweep, the map should be much smaller.

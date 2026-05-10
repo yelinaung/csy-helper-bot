@@ -12,6 +12,8 @@ import (
 const (
 	defaultExplainRateLimitCount  = 5
 	defaultExplainRateLimitWindow = time.Minute
+
+	rateLimitMaxMapSize = 10000
 )
 
 type rateEntry struct {
@@ -50,6 +52,13 @@ func (r *memoryRateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 
 	entry, ok := r.data[key]
 	if !ok || now.Sub(entry.windowStart) >= r.window {
+		// Only sweep when inserting a new key and the map is at capacity.
+		if !ok && len(r.data) >= rateLimitMaxMapSize {
+			r.sweepLocked(now)
+			if len(r.data) >= rateLimitMaxMapSize {
+				return false, r.window
+			}
+		}
 		r.data[key] = rateEntry{windowStart: now, count: 1}
 		return true, 0
 	}
@@ -63,6 +72,16 @@ func (r *memoryRateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 	retryAfter := r.window - now.Sub(entry.windowStart)
 	retryAfter = max(retryAfter, 0)
 	return false, retryAfter
+}
+
+// sweepLocked deletes all entries that have expired. Must be called
+// with r.mu held.
+func (r *memoryRateLimiter) sweepLocked(now time.Time) {
+	for key, entry := range r.data {
+		if now.Sub(entry.windowStart) >= r.window {
+			delete(r.data, key)
+		}
+	}
 }
 
 func loadExplainRateLimiter() *memoryRateLimiter {

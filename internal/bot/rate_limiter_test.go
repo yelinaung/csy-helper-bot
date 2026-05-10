@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -126,4 +127,82 @@ func TestGetenvTrim(t *testing.T) {
 			t.Fatalf("expected %q, got %q", "world", got)
 		}
 	})
+}
+
+func TestMemoryRateLimiter_Sweep(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	now := time.Now()
+
+	// Fill the map to capacity through allow().
+	for i := range rateLimitMaxMapSize {
+		key := fmt.Sprintf("user:%d", i)
+		ok, _ := rl.allow(key, now)
+		if !ok {
+			t.Fatalf("first request for key %d should pass", i)
+		}
+	}
+
+	// All entries are at capacity — new keys are rejected.
+	ok, _ := rl.allow("overflow:1", now)
+	if ok {
+		t.Fatal("expected overflow key to be rejected at capacity")
+	}
+
+	// Move time forward past the window so all entries are expired.
+	future := now.Add(20 * time.Second)
+
+	// One more request should trigger the sweep, freeing space.
+	ok, _ = rl.allow("newuser:1", future)
+	if !ok {
+		t.Fatal("request with a fresh key should pass after sweep")
+	}
+
+	// After sweep, the map should be much smaller.
+	rl.mu.Lock()
+	mapLen := len(rl.data)
+	rl.mu.Unlock()
+
+	if mapLen >= rateLimitMaxMapSize {
+		t.Fatalf("expected sweep to reduce map size below %d, got %d", rateLimitMaxMapSize, mapLen)
+	}
+}
+
+func TestMemoryRateLimiter_Sweep_Partial(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	now := time.Now()
+
+	expiredKey := "user:expired"
+	activeKey := "user:active"
+
+	expiredStart := now.Add(-2 * rl.window)
+	activeStart := now
+
+	// Seed one expired and one active entry.
+	ok, _ := rl.allow(expiredKey, expiredStart)
+	if !ok {
+		t.Fatal("first request for expiredKey should pass")
+	}
+	ok, _ = rl.allow(activeKey, activeStart)
+	if !ok {
+		t.Fatal("first request for activeKey should pass")
+	}
+
+	// Sweep at a point where expiredKey is expired but activeKey still
+	// within its window.
+	sweepTime := activeStart.Add(rl.window / 2)
+	rl.mu.Lock()
+	rl.sweepLocked(sweepTime)
+	rl.mu.Unlock()
+
+	// Expired entry should be gone — a fresh request for it passes again.
+	ok, _ = rl.allow(expiredKey, sweepTime)
+	if !ok {
+		t.Fatal("expiredKey should have been removed and allowed again after sweep")
+	}
+
+	// Active entry (limit=1) should still block a second request.
+	ok, _ = rl.allow(activeKey, sweepTime)
+	if ok {
+		t.Fatal("activeKey should still be rate-limited after sweep")
+	}
 }

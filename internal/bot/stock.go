@@ -34,6 +34,15 @@ var (
 
 var errDatabentoAPIKeyNotConfigured = errors.New("databento api key not configured")
 
+// stockRangeDays maps range tokens to day counts for both !s and !sa
+// commands.
+var stockRangeDays = map[string]int{
+	"7d":  7,
+	"30d": 30,
+	"60d": 60,
+	"90d": 90,
+}
+
 type httpStatusError struct {
 	StatusCode int
 	Status     string
@@ -266,48 +275,60 @@ func updateStockLoadingState(
 	}
 }
 
+// extractSymbolToken validates that text starts with prefix followed by
+// either end-of-string or a space, then extracts and validates the first
+// token as a stock symbol. Returns the validated symbol and all
+// space-split tokens (including the symbol itself as parts[0]). The
+// caller is responsible for range parsing or extra-token rejection. The
+// usageMsg parameter allows each parser to emit its own error text.
+// Does NOT trim leading whitespace — preserves existing behavior where
+// " !s AAPL" is rejected (HasPrefix fails on the space).
+func extractSymbolToken(text, prefix, usageMsg string) (symbol string, parts []string, err error) {
+	if !strings.HasPrefix(text, prefix) {
+		return "", nil, errors.New(usageMsg)
+	}
+
+	remainder := text[len(prefix):]
+	if remainder != "" && remainder[0] != ' ' {
+		return "", nil, errors.New(usageMsg)
+	}
+
+	args := strings.TrimSpace(remainder)
+	if args == "" {
+		return "", nil, errors.New("please provide a stock symbol, usage: " + prefix + " AAPL")
+	}
+
+	parts = strings.Fields(args)
+	symbol = strings.ToUpper(parts[0])
+	if !symbolRegex.MatchString(symbol) {
+		return "", nil, errors.New("invalid stock symbol, use 1-10 characters: letters, numbers, dots (.) or dashes (-), e.g., AAPL, BRK.A")
+	}
+
+	return symbol, parts, nil
+}
+
 // parseStockCommand parses `!s` commands and validates symbol/range inputs.
 func parseStockCommand(text string) (string, int, error) {
-	if strings.HasPrefix(text, "!s") && len(text) > 2 {
-		if text[2] != ' ' {
-			return "", 0, errors.New(invalidUsageSymbol)
-		}
+	symbol, parts, err := extractSymbolToken(text, "!s", invalidUsageSymbol)
+	if err != nil {
+		return "", 0, err
 	}
 
-	raw := strings.TrimSpace(strings.TrimPrefix(text, "!s"))
-	if raw == "" {
-		return "", 0, errors.New("please provide a stock symbol, usage: !s AAPL or !s AAPL 7d")
-	}
-
-	parts := strings.Fields(raw)
 	if len(parts) > 2 {
 		return "", 0, errors.New(invalidUsageSymbol)
-	}
-
-	symbol := strings.ToUpper(parts[0])
-	if !symbolRegex.MatchString(symbol) {
-		return "", 0, errors.New("invalid stock symbol, use 1-10 characters: letters, numbers, dots (.) or dashes (-), e.g., AAPL, BRK.A")
 	}
 
 	if len(parts) == 1 {
 		return symbol, 0, nil
 	}
 
-	switch strings.ToLower(parts[1]) {
-	case "7d":
-		return symbol, 7, nil
-	case "30d":
-		return symbol, 30, nil
-	case "60d":
-		return symbol, 60, nil
-	case "90d":
-		return symbol, 90, nil
-	default:
-		if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
-			return "", 0, errors.New("invalid range, use 7d, 30d, 60d or 90d (e.g., !s AAPL 7d)")
-		}
-		return "", 0, errors.New(invalidUsageSymbol)
+	if days, ok := stockRangeDays[strings.ToLower(parts[1])]; ok {
+		return symbol, days, nil
 	}
+	if rangeTokenRE.MatchString(strings.ToLower(parts[1])) {
+		return "", 0, errors.New("invalid range, use 7d, 30d, 60d or 90d (e.g., !s AAPL 7d)")
+	}
+	return "", 0, errors.New(invalidUsageSymbol)
 }
 
 func blockedStockResponse(symbol string) (string, bool) {

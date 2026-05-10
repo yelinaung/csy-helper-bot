@@ -140,7 +140,7 @@ func TestGeminiExplainer_BlockedCandidateFinishReason(t *testing.T) {
 	}
 }
 
-func TestGeminiExplainer_EmptyStopResponseIsBlocked(t *testing.T) {
+func TestGeminiExplainer_EmptyStopResponse(t *testing.T) {
 	explainer := &geminiExplainer{
 		generator: &mockContentGenerator{
 			resp: &genai.GenerateContentResponse{
@@ -158,8 +158,14 @@ func TestGeminiExplainer_EmptyStopResponseIsBlocked(t *testing.T) {
 	}
 
 	_, err := explainer.explainWithLanguage(context.Background(), "hello", "", false)
-	if !errors.Is(err, ErrExplainBlocked) {
-		t.Fatalf("expected ErrExplainBlocked, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty response")
+	}
+	if errors.Is(err, ErrExplainBlocked) {
+		t.Fatal("FinishReasonStop should not map to ErrExplainBlocked")
+	}
+	if !strings.Contains(err.Error(), "empty explanation") {
+		t.Fatalf("expected empty-explanation error, got %v", err)
 	}
 }
 

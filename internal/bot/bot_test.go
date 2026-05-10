@@ -16,6 +16,11 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
+const (
+	testSymbolAAPL      = "AAPL"
+	testErrInvalidUsage = "invalid usage"
+)
+
 type rewriteHostTransport struct {
 	base   http.RoundTripper
 	target *url.URL
@@ -255,9 +260,9 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 		Industry:             "Technology",
 	}
 
-	msg := formatStockMessage("AAPL", quote, profile)
+	msg := formatStockMessage(testSymbolAAPL, quote, profile)
 
-	if !strings.Contains(msg, "AAPL") {
+	if !strings.Contains(msg, testSymbolAAPL) {
 		t.Error("message should contain symbol")
 	}
 	if !strings.Contains(msg, "Apple Inc") {
@@ -343,7 +348,7 @@ func TestFetchStockQuote(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("symbol") != "AAPL" {
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
 		}
 		if r.URL.Query().Get("token") != "test-key" {
@@ -357,7 +362,7 @@ func TestFetchStockQuote(t *testing.T) {
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
 
-	result, err := fetchStockQuote(context.Background(), "AAPL")
+	result, err := fetchStockQuote(context.Background(), testSymbolAAPL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -379,7 +384,7 @@ func TestFetchStockQuote_ServerError(t *testing.T) {
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
 
-	_, err := fetchStockQuote(context.Background(), "AAPL")
+	_, err := fetchStockQuote(context.Background(), testSymbolAAPL)
 	if err == nil {
 		t.Error("expected error for server error response")
 	}
@@ -410,7 +415,7 @@ func TestFetchCompanyProfile(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("symbol") != "AAPL" {
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -421,7 +426,7 @@ func TestFetchCompanyProfile(t *testing.T) {
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
 
-	result, err := fetchCompanyProfile(context.Background(), "AAPL")
+	result, err := fetchCompanyProfile(context.Background(), testSymbolAAPL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +456,7 @@ func TestBlockedStockResponse(t *testing.T) {
 	}{
 		{"blocked symbol returns message", "TEAM", true, "Please.. no.. don't .. oh god why"},
 		{"another blocked symbol", "SCAM", true, "nope"},
-		{"unblocked symbol", "AAPL", false, ""},
+		{"unblocked symbol", testSymbolAAPL, false, ""},
 		{"lowercase not matched", "team", false, ""},
 		{"empty symbol", "", false, ""},
 	}
@@ -493,20 +498,20 @@ func TestParseStockCommand(t *testing.T) {
 		wantError bool
 		errSubstr string
 	}{
-		{name: "spot quote", input: "!s AAPL", wantSym: "AAPL", wantDays: 0},
-		{name: "historical 7d", input: "!s AAPL 7d", wantSym: "AAPL", wantDays: 7},
+		{name: "spot quote", input: "!s AAPL", wantSym: testSymbolAAPL, wantDays: 0},
+		{name: "historical 7d", input: "!s AAPL 7d", wantSym: testSymbolAAPL, wantDays: 7},
 		{name: "historical 30d", input: "!s msft 30d", wantSym: "MSFT", wantDays: 30},
-		{name: "tab after command", input: "!s\tAAPL", wantError: true, errSubstr: "invalid usage"},
-		{name: "newline after command with range", input: "!s\nAAPL 7d", wantError: true, errSubstr: "invalid usage"},
-		{name: "missing separator after command", input: "!sAAPL", wantError: true, errSubstr: "invalid usage"},
+		{name: "tab after command", input: "!s\tAAPL", wantError: true, errSubstr: testErrInvalidUsage},
+		{name: "newline after command with range", input: "!s\nAAPL 7d", wantError: true, errSubstr: testErrInvalidUsage},
+		{name: "missing separator after command", input: "!sAAPL", wantError: true, errSubstr: testErrInvalidUsage},
 		{name: "invalid range", input: "!s AAPL 10d", wantError: true, errSubstr: "invalid range"},
 		{name: "invalid range 1d", input: "!s AAPL 1d", wantError: true, errSubstr: "invalid range"},
 		{name: "invalid range 365d", input: "!s AAPL 365d", wantError: true, errSubstr: "invalid range"},
 		{name: "invalid symbol chars", input: "!s $$$", wantError: true, errSubstr: "invalid stock symbol"},
 		{name: "invalid symbol punctuation", input: "!s AAPL!", wantError: true, errSubstr: "invalid stock symbol"},
-		{name: "invalid symbol with extra token", input: "!s AA PL", wantError: true, errSubstr: "invalid usage"},
-		{name: "second symbol token", input: "!s AAPL MSFT", wantError: true, errSubstr: "invalid usage"},
-		{name: "nonsensical second token", input: "!s AAPL foobar", wantError: true, errSubstr: "invalid usage"},
+		{name: "invalid symbol with extra token", input: "!s AA PL", wantError: true, errSubstr: testErrInvalidUsage},
+		{name: "second symbol token", input: "!s AAPL MSFT", wantError: true, errSubstr: testErrInvalidUsage},
+		{name: "nonsensical second token", input: "!s AAPL foobar", wantError: true, errSubstr: testErrInvalidUsage},
 		{name: "empty", input: "!s", wantError: true, errSubstr: "please provide"},
 	}
 
@@ -538,7 +543,7 @@ func TestRenderHistoricalChartPNG(t *testing.T) {
 		{Date: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), Close: 101.25},
 		{Date: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Close: 99.75},
 	}
-	buf, err := renderHistoricalChartPNG("AAPL", 7, bars)
+	buf, err := renderHistoricalChartPNG(testSymbolAAPL, 7, bars)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -559,7 +564,7 @@ func TestFormatHistoricalSummary(t *testing.T) {
 		{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Close: 100, High: 102, Low: 99},
 		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 110, High: 111, Low: 98},
 	}
-	got := formatHistoricalSummary("AAPL", 7, bars, nil)
+	got := formatHistoricalSummary(testSymbolAAPL, 7, bars, nil)
 	if !strings.Contains(got, "AAPL 7d") {
 		t.Fatalf("expected symbol and range in summary, got %q", got)
 	}
@@ -569,7 +574,7 @@ func TestFormatHistoricalSummary(t *testing.T) {
 }
 
 func TestFormatHistoricalSummary_EmptyBars(t *testing.T) {
-	got := formatHistoricalSummary("AAPL", 7, nil, nil)
+	got := formatHistoricalSummary(testSymbolAAPL, 7, nil, nil)
 	if !strings.Contains(got, "No historical data returned") {
 		t.Fatalf("expected empty-data message, got %q", got)
 	}
@@ -717,7 +722,7 @@ func TestSymbolValidation(t *testing.T) {
 		symbol  string
 		isValid bool
 	}{
-		{"valid simple", "AAPL", true},
+		{"valid simple", testSymbolAAPL, true},
 		{"valid with dot", "BRK.A", true},
 		{"valid with hyphen", "BF-B", true},
 		{"valid single char", "T", true},

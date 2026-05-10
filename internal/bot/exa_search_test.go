@@ -58,7 +58,7 @@ func TestSearchStockNews_Success(t *testing.T) {
 
 	useRedirectedHTTPClient(t, server.URL)
 
-	results, err := searchStockNews(context.Background(), "AAPL", nil)
+	results, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSearchStockNews_EmptyResults(t *testing.T) {
 
 	useRedirectedHTTPClient(t, server.URL)
 
-	results, err := searchStockNews(context.Background(), "AAPL", nil)
+	results, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSearchStockNews_ServerError(t *testing.T) {
 
 	useRedirectedHTTPClient(t, server.URL)
 
-	_, err := searchStockNews(context.Background(), "AAPL", nil)
+	_, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err == nil {
 		t.Fatal("expected error for 500 response")
 	}
@@ -130,7 +130,7 @@ func TestSearchStockNews_Unauthorized(t *testing.T) {
 
 	useRedirectedHTTPClient(t, server.URL)
 
-	_, err := searchStockNews(context.Background(), "AAPL", nil)
+	_, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err == nil {
 		t.Fatal("expected error for 401 response")
 	}
@@ -139,7 +139,7 @@ func TestSearchStockNews_Unauthorized(t *testing.T) {
 func TestSearchStockNews_MissingAPIKey(t *testing.T) {
 	t.Setenv("EXA_API_KEY", "")
 
-	_, err := searchStockNews(context.Background(), "AAPL", nil)
+	_, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -163,7 +163,7 @@ func TestSearchStockNews_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := searchStockNews(ctx, "AAPL", nil)
+	_, err := searchStockNews(ctx, testSymbolAAPL, nil)
 	if err == nil {
 		t.Fatal("expected error for canceled context")
 	}
@@ -178,7 +178,7 @@ func TestBuildStockSearchQuery(t *testing.T) {
 	}{
 		{
 			name:   "with profile name",
-			symbol: "AAPL",
+			symbol: testSymbolAAPL,
 			profile: &CompanyProfile{
 				Name: "Apple Inc",
 			},
@@ -378,7 +378,7 @@ func TestExaResultsCache_Hit(t *testing.T) {
 	useRedirectedHTTPClient(t, server.URL)
 
 	// First call — should hit the server.
-	results, err := searchStockNews(context.Background(), "AAPL", nil)
+	results, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestExaResultsCache_Hit(t *testing.T) {
 	}
 
 	// Second call — should return from cache without HTTP request.
-	results, err = searchStockNews(context.Background(), "AAPL", nil)
+	results, err = searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -423,13 +423,13 @@ func TestExaResultsCache_Expired(t *testing.T) {
 	useRedirectedHTTPClient(t, server.URL)
 
 	// First call — caches the result.
-	_, err := searchStockNews(context.Background(), "AAPL", nil)
+	_, err := searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Manually expire the cache entry.
-	query := buildStockSearchQuery("AAPL", nil)
+	query := buildStockSearchQuery(testSymbolAAPL, nil)
 	cacheKey := query + ":2"
 	exaCacheMu.Lock()
 	if entry, ok := exaCache[cacheKey]; ok {
@@ -439,7 +439,7 @@ func TestExaResultsCache_Expired(t *testing.T) {
 	exaCacheMu.Unlock()
 
 	// Second call — cache expired, should make a new request.
-	_, err = searchStockNews(context.Background(), "AAPL", nil)
+	_, err = searchStockNews(context.Background(), testSymbolAAPL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

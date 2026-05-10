@@ -465,6 +465,7 @@ func loadAnalysisTimeout() (time.Duration, error) {
     return time.Duration(seconds) * time.Second, nil
 }
 ```
+```text
 stockAnalysisHandler
   │
   ├─ parseStockAnalysisCommand(update.Message.Text)
@@ -1008,7 +1009,7 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 |---|----------|-----------|
 | 1 | **Extract `extractSymbolToken` helper** instead of new standalone parser or parameterizing `parseStockCommand` | `parseStockCommand` has range-token logic specific to `!s`. Extracting symbol validation into a 3-arg helper (`text, prefix, usageMsg`) avoids refactoring risks while keeping both parsers thin. `parseStockAnalysisCommand` = `extractSymbolToken("!sa", analysisInvalidUsageMsg)` + reject-extra-tokens. |
 | 2 | **`models.ParseModeMarkdown`** (which IS MarkdownV2 in this library) | In go-telegram/bot v1.20.0: `ParseModeMarkdown = "MarkdownV2"` and `ParseModeMarkdownV1 = "Markdown"`. Since `formatTelegramMarkdown` does V2 escaping, using `ParseModeMarkdown` aligns escaping with parse mode. The constant `ParseModeMarkdownV2` does NOT exist. |
-| 3 | **Footer uses `·` (U+00B7) not `|`** | `|` is reserved in MarkdownV2. If Gemini emits it, the send fails and we fall back to plaintext. Using middle dot in the prompt instruction prevents the failure entirely. |
+| 3 | **Footer uses `·` (U+00B7) not \|** | \| is reserved in MarkdownV2. If Gemini emits it, the send fails and we fall back to plaintext. Using middle dot in the prompt instruction prevents the failure entirely. |
 | 4 | **`STOCK_ANALYSIS_TIMEOUT_SECONDS`** (unit-suffixed) | Matches codebase convention: `GEMINI_TIMEOUT_SECONDS`, `EXPLAIN_RATE_LIMIT_WINDOW_SECONDS`, `STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS`. |
 | 5 | **`sanitizeAnalysisInput` sanitizes Profile + NewsItems before JSON** | Profile.Name and Profile.Industry come from Finnhub and can be long. Exa titles/highlights are web content. ALL untrusted fields are sanitized with per-field rune budgets. The serialized payload is checked against `maxPromptTotalRuneLen` (4000 runes) and truncated if needed. |
 | 6 | **Exa highlights + Profile in JSON payload** (same scheme as explainer) | News articles are the highest-risk surface for prompt injection. JSON-payload-with-nonce scheme from `gemini_explainer.go` defangs injection. Sanitization happens before JSON serialization. |

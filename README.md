@@ -13,6 +13,7 @@ A Telegram bot that provides helpful utilities for developers.
 - `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
 - `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
 - `!s SYMBOL 7d|30d|60d|90d` - Get historical stock chart image + summary (e.g., `!s AAPL 7d`)
+- `!sa SYMBOL` - AI-generated stock analysis using Exa news + Gemini (e.g., `!sa AAPL`)
 - `@<bot_username> <question>` - Asks anything with Gemini (works with or without quoting a message)
 - Burmese-aware answers:
   - If requester text or quoted text contains Burmese, answer in Burmese
@@ -30,7 +31,8 @@ A Telegram bot that provides helpful utilities for developers.
 1. Create a bot via [@BotFather](https://t.me/BotFather) and get your token
 2. Get a free API key from [Finnhub](https://finnhub.io/) for stock prices
 3. Get a Databento API key from [Databento](https://databento.com/) for historical stock data
-4. Create a `.env` file:
+4. Get an API key from [Exa](https://exa.ai/) for web search (required for `!sa` command)
+5. Create a `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
@@ -42,6 +44,18 @@ A Telegram bot that provides helpful utilities for developers.
    GEMINI_MODEL=gemini-3-flash-preview
    # optional (defaults to 60)
    GEMINI_TIMEOUT_SECONDS=60
+   # Stock analysis (optional — requires GEMINI_API_KEY + EXA_API_KEY)
+   STOCK_ANALYSIS_ENABLED=true
+   EXA_API_KEY=your_exa_key_here
+   # optional (defaults to gemini-2.5-flash)
+   STOCK_ANALYSIS_MODEL=gemini-2.5-flash
+   # optional (defaults to 90)
+   STOCK_ANALYSIS_TIMEOUT_SECONDS=90
+   # optional (defaults to 5 requests per 300 seconds)
+   STOCK_ANALYSIS_RATE_LIMIT_COUNT=5
+   STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS=300
+   # optional (defaults to 5, capped at 20)
+   EXA_NUM_RESULTS=5
    ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
    EXPLAIN_RATE_LIMIT_COUNT=5
    EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
@@ -58,6 +72,7 @@ A Telegram bot that provides helpful utilities for developers.
   - `!s AAPL` - current quote
   - `!s AAPL 7d` - 7-day historical chart image
   - `!s AAPL 30d` - 30-day historical chart image (+ 60d/90d also supported)
+  - `!sa AAPL` - AI stock analysis (quote + latest news + Gemini summary)
 - Ask directly:
   - `@<bot_username> what does mutex mean?`
   - `@<bot_username> can you explain this and that?` (while replying to a quoted message)
@@ -83,6 +98,9 @@ docker run \
   -e GEMINI_API_KEY=your_gemini_key \
   -e GEMINI_MODEL=gemini-3-flash-preview \
   -e GEMINI_TIMEOUT_SECONDS=60 \
+  -e STOCK_ANALYSIS_ENABLED=true \
+  -e EXA_API_KEY=your_exa_key \
+  -e STOCK_ANALYSIS_MODEL=gemini-2.5-flash \
   -e ALLOWED_GROUP_IDS=-1001234567890 \
   -e LOG_LEVEL=info \
   csy-helper-bot
@@ -100,6 +118,9 @@ dokku config:set csy-helper-bot DATABENTO_DATASET=EQUS.MINI
 dokku config:set csy-helper-bot GEMINI_API_KEY=your_gemini_key
 dokku config:set csy-helper-bot GEMINI_MODEL=gemini-3-flash-preview
 dokku config:set csy-helper-bot GEMINI_TIMEOUT_SECONDS=60
+dokku config:set csy-helper-bot STOCK_ANALYSIS_ENABLED=true
+dokku config:set csy-helper-bot EXA_API_KEY=your_exa_key
+dokku config:set csy-helper-bot STOCK_ANALYSIS_MODEL=gemini-2.5-flash
 dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60

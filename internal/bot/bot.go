@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -405,10 +406,7 @@ func initStockAnalyzer() {
 		return
 	}
 
-	model := strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_MODEL"))
-	if model == "" {
-		model = defaultGeminiModelName
-	}
+	model := cmp.Or(strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_MODEL")), defaultGeminiModelName)
 	timeout, err := loadAnalysisTimeout()
 	if err != nil {
 		log.Error().Err(err).Msg("Stock analysis disabled: invalid STOCK_ANALYSIS_TIMEOUT_SECONDS")

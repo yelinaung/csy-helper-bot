@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -125,14 +126,9 @@ func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Du
 		return nil, errors.New("gemini API key is required")
 	}
 
-	model = strings.TrimSpace(model)
-	if model == "" {
-		model = defaultGeminiModelName
-	}
+	model = cmp.Or(strings.TrimSpace(model), defaultGeminiModelName)
 
-	if timeout <= 0 {
-		timeout = time.Duration(defaultAnalysisTimeoutSec) * time.Second
-	}
+	timeout = cmp.Or(timeout, time.Duration(defaultAnalysisTimeoutSec)*time.Second)
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
@@ -301,9 +297,7 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	}
 
 	timeout := a.timeout
-	if timeout <= 0 {
-		timeout = time.Duration(defaultAnalysisTimeoutSec) * time.Second
-	}
+	timeout = cmp.Or(timeout, time.Duration(defaultAnalysisTimeoutSec)*time.Second)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

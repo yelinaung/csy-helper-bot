@@ -816,6 +816,8 @@ func TestEscapeLinkURLMarkdownV2(t *testing.T) {
 		{"URL with close paren", "https://example.com/foo)", `https://example.com/foo\)`},
 		{"URL with double backslash", `https://example.com/a\\b`, `https://example.com/a\\\\b`},
 		{"both double backslash and paren", `https://example.com/a\\b_(c)`, `https://example.com/a\\\\b_(c\)`},
+		{"URL with bracket", "https://example.com/report[1]", `https://example.com/report\[1\]`},
+		{"URL with both brackets", "https://exa.ai/search?q=[AAPL]", `https://exa.ai/search?q=\[AAPL\]`},
 	}
 
 	for _, tt := range tests {

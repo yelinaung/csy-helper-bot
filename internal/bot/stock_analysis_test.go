@@ -773,11 +773,12 @@ func TestStockAnalysisHandler_RateLimitKey(t *testing.T) {
 
 // testBotServer captures Telegram API calls for handler testing.
 type testBotServer struct {
-	mu           sync.Mutex
-	requestLog   []string // method names captured from URL paths
-	lastMessage  string   // text captured from last sendMessage/editMessageText
-	failNextEdit bool     // return error on next editMessageText call
-	failNextSend bool     // return error on next sendMessage call
+	mu            sync.Mutex
+	requestLog    []string // method names captured from URL paths
+	lastMessage   string   // text captured from last sendMessage/editMessageText
+	lastParseMode string   // parse_mode captured from last sendMessage/editMessageText
+	failNextEdit  bool     // return error on next editMessageText call
+	failNextSend  bool     // return error on next sendMessage call
 }
 
 func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -807,6 +808,7 @@ func (s *testBotServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if txt := r.FormValue("text"); txt != "" {
 			s.lastMessage = txt
 		}
+		s.lastParseMode = r.FormValue("parse_mode")
 	}
 	s.mu.Unlock()
 
@@ -1008,6 +1010,43 @@ func TestSendOrEditAnalysisResult_EditSuccess(t *testing.T) {
 	lastMethod := srv.lastMethod()
 	if !strings.Contains(lastMethod, "editMessageText") {
 		t.Fatalf("expected editMessageText call, got %q", lastMethod)
+	}
+}
+
+func TestSendOrEditAnalysisResult_NormalizesEscapedMarkdown(t *testing.T) {
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+	loadingMsg := &models.Message{ID: 99}
+
+	analysis := `**Apple Inc\. \(AAPL\)** Analysis
+
+Apple Inc\. is up **$5\.90 \(\+2\.05\%\)**\.
+_[Source: [BusinessWire](https://example.com/story)]_
+
+_This is not financial advice\._`
+
+	sendOrEditAnalysisResult(context.Background(), b, update, loadingMsg, nil, analysis)
+
+	if srv.lastParseMode != string(models.ParseModeMarkdown) {
+		t.Fatalf("expected MarkdownV2 parse mode, got %q", srv.lastParseMode)
+	}
+	if strings.Contains(srv.lastMessage, "**Apple") {
+		t.Fatalf("expected double-star bold to be converted, got %q", srv.lastMessage)
+	}
+	if !strings.Contains(srv.lastMessage, `*Apple Inc\. \(AAPL\)* Analysis`) {
+		t.Fatalf("expected normalized title markdown, got %q", srv.lastMessage)
+	}
+	if !strings.Contains(srv.lastMessage, `[BusinessWire](https://example.com/story)`) {
+		t.Fatalf("expected source link markdown, got %q", srv.lastMessage)
+	}
+	if strings.Contains(srv.lastMessage, `\[BusinessWire\]`) {
+		t.Fatalf("expected escaped source brackets to be normalized, got %q", srv.lastMessage)
 	}
 }
 

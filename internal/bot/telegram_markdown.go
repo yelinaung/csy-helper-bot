@@ -3,15 +3,18 @@ package bot
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/go-telegram/bot"
 )
 
+const generatedMarkdownEscapes = "_*[]()~`>#+-=|{}.!%"
+
 var (
 	markdownCodeBlockRE  = regexp.MustCompile("(?s)```(.*?)```")
 	markdownInlineCodeRE = regexp.MustCompile("`([^`\n]+)`")
-	markdownLinkRE       = regexp.MustCompile(`\[(.+?)\]\((https?://[^)\s]+)\)`)
+	markdownLinkRE       = regexp.MustCompile(`\[([^\[\]\n]+)\]\((https?://[^)\s]+)\)`)
 	markdownBoldRE       = regexp.MustCompile(`\*\*(.+?)\*\*|__(.+?)__`)
 	markdownItalicRE     = regexp.MustCompile(`\*([^*\n]+)\*|_([^_\n]+)_`)
 )
@@ -69,11 +72,41 @@ func formatTelegramMarkdown(text string) string {
 	})
 
 	escaped := bot.EscapeMarkdownUnescaped(normalized)
-	for i, token := range tokens {
+	for i, token := range slices.Backward(tokens) {
 		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("TGMARKTOKEN%dX", i), token)
 	}
 
 	return escaped
+}
+
+func normalizeGeneratedTelegramMarkdown(text string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\\' && i+1 < len(text) && strings.ContainsRune(generatedMarkdownEscapes, rune(text[i+1])) {
+			i++
+		}
+		out.WriteByte(text[i])
+	}
+
+	return out.String()
+}
+
+func plainTelegramMarkdownText(text string) string {
+	normalized := normalizeGeneratedTelegramMarkdown(strings.ReplaceAll(text, "\r\n", "\n"))
+
+	normalized = markdownCodeBlockRE.ReplaceAllString(normalized, "$1")
+	normalized = markdownInlineCodeRE.ReplaceAllString(normalized, "$1")
+	normalized = markdownLinkRE.ReplaceAllString(normalized, "$1 ($2)")
+	normalized = markdownBoldRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		return extractAlternation(markdownBoldRE, match)
+	})
+	normalized = markdownItalicRE.ReplaceAllStringFunc(normalized, func(match string) string {
+		return extractAlternation(markdownItalicRE, match)
+	})
+
+	return strings.TrimSpace(normalized)
 }
 
 func extractAlternation(re *regexp.Regexp, match string) string {
@@ -99,6 +132,8 @@ func escapeLinkURLMarkdownV2(text string) string {
 	replacer := strings.NewReplacer(
 		`\\`, `\\\\`,
 		`)`, `\)`,
+		`[`, `\[`,
+		`]`, `\]`,
 	)
 	return replacer.Replace(text)
 }

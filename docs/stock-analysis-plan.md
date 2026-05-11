@@ -18,29 +18,29 @@ Add a `!sa SYMBOL` command that provides AI-powered stock analysis by combining:
 ### Data Flow
 
 ```text
-┌──────────────────┐
+┌────────────────────┐
 │ parseStockAnalysis │  !sa AAPL → symbol="AAPL"
-│ Command()         │  !sa AAPL 7d → error (rejected)
-└────────┬─────────┘
+│ Command()          │  !sa AAPL 7d → error (rejected)
+└────────┬───────────┘
          │
-    ┌────▼────┐
-    │ Finnhub  │  quote (fetchStockQuote) — returns error → abort
-    │ (seq)    │  profile (fetchCompanyProfile) — returns error → log warn, nil, continue
-    └────┬────┘
+    ┌────▼──────┐
+    │ Finnhub   │  quote (fetchStockQuote) — returns error → abort
+    │ (seq)     │  profile (fetchCompanyProfile) — returns error → log warn, nil, continue
+    └────┬──────┘
          │
-    ┌────▼────────────┐  ┌──────────────────────────────┐
-    │ Exa /search      │──▶│ highlights: ["Apple reports  │
-    │ cache→TTL 5 min  │  │ record Q2 revenue...", ...]  │
-    └────┬────────────┘  └──────────────────────────────┘
+    ┌────▼────────────┐     ┌──────────────────────────────┐
+    │ Exa /search     │────▶│ highlights: ["Apple reports  │
+    │ cache→TTL 5 min │     │ record Q2 revenue...", ...]  │
+    └────┬────────────┘     └──────────────────────────────┘
          │
     ┌────▼────────────┐
-    │ Gemini           │  Prompt: all untrusted data in JSON payload
-    │ synthesize       │  with nonce/marker injection protection
+    │ Gemini          │  Prompt: all untrusted data in JSON payload
+    │ synthesize      │  with nonce/marker injection protection
     └────┬────────────┘
          │
     ┌────▼────────────┐
-│ MarkdownV2       │  formatTelegramMarkdown() + models.ParseModeMarkdown
-│ response         │  (new sendOrEditAnalysisResult helper)
+    │ MarkdownV2      │  formatTelegramMarkdown() + models.ParseModeMarkdown
+    │ response        │  (new sendOrEditAnalysisResult helper)
     └─────────────────┘
 ```
 
@@ -442,6 +442,8 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 }
 ```
 
+| Function | Signature | Purpose |
+|----------|-----------|---------|
 | `newStockAnalyzer` | `func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error)` | Constructor using `genai.NewClient` |
 | `(*stockAnalyzer).analyze` | `func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) (string, error)` | Builds prompt, calls Gemini, handles errors |
 | `buildAnalysisPrompt` | `func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error)` | Builds prompt with JSON payload + nonce/marker scheme. When `len(NewsItems) == 0`, appends `analysisNoNewsNote` to the prompt preamble. |

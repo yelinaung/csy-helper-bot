@@ -8,7 +8,7 @@ require (
 	github.com/go-telegram/bot v1.20.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.35.1
-	google.golang.org/genai v1.55.0
+	google.golang.org/genai v1.56.0
 )
 
 require (

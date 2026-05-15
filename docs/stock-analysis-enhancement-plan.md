@@ -8,6 +8,24 @@ Enhance the `!sa SYMBOL` command from a flat "summary" analysis to a deeper, sec
 2. **Analyst consensus data** — buy/hold/sell trends from Finnhub
 3. **Restructured prompt** — labeled sections instead of a single summary block
 
+### Quick Navigation
+
+- [Architecture](#architecture-updated) — data flow diagram, new Finnhub endpoints
+- [New Types](#new-types) — raw Finnhub types, sanitized types, input/payload structs
+- [Prompt Redesign](#prompt-redesign) — TL;DR, sectioned output, hardcoded disclaimer
+- [Sanitization](#sanitization) — per-field sanitizers, UpsidePct guard
+- [Prompt Budget Strategy](#prompt-budget-strategy) — 5-stage field-drop cascade
+- [Implementation Order](#implementation-order) — 4-step build sequence
+- [Design Decisions](#design-decisions-log) — 21 entries covering all tradeoffs
+- [Future Roadmap](#future-roadmap) — v5 through v8, what's skipped
+
+> **Non-normative notice:** Sections containing concrete implementation details
+> (function signatures, test names, line counts, Go code blocks) are design
+> guidance that may drift from the final code. Authoritative references live in:
+> - `internal/bot/stock_analysis.go` — handler, analyzer, prompt, sanitizers
+> - `internal/bot/stock_fundamentals.go` — Finnhub fundamentals fetchers
+> - `internal/bot/bot.go` — initialization, rate limiter, handler registration
+
 ## Current State (v3)
 
 The `!sa` pipeline feeds Gemini:
@@ -227,6 +245,14 @@ type sanitizedPriceTarget struct {
 `(TargetMean / CurrentPrice - 1) * 100`. This gives Gemini a single
 directional number without requiring it to compute from the raw fields.
 
+**Guard against +Inf:** If `CurrentPrice` is zero or negative (unlikely for
+live stocks but possible for delisted/penny-stock edge cases or the zero-valued
+Finnhub default), the division produces +Inf or NaN. Standard JSON does not
+support these values — `json.Marshal` would fail on the entire prompt payload,
+breaking the analysis. `priceTargetToSanitized` must check
+`CurrentPrice > 0` before computing `UpsidePct`. If `CurrentPrice <= 0`,
+`UpsidePct` is set to zero (which `omitempty` will exclude).
+
 ```go
 func fetchPriceTarget(ctx context.Context, symbol string) (*PriceTarget, error)
 ```
@@ -297,14 +323,16 @@ type sanitizedMetrics struct {
     EPSGrowth      float64 `json:"eps_growth_pct,omitempty"`
 }
 
-// sanitizedEarningsHistory is what goes into the Gemini prompt payload
-// after conversion from Finnhub's raw EarningsEntry.
-type sanitizedEarningsHistory struct {
-    Period       string  `json:"period"`
-    Estimate     float64 `json:"estimate"`
-    Actual       float64 `json:"actual"`
-    Surprise     float64 `json:"surprise"`
-    SurprisePct  float64 `json:"surprise_percent"`
+// EarningsReaction is what goes into the Gemini prompt payload for each
+// quarterly earnings period. It extends EarningsEntry with a server-computed
+// next-day price move. See "Post-Earnings Reaction" section above.
+type EarningsReaction struct {
+    Period           string  `json:"period"`
+    Estimate         float64 `json:"estimate"`
+    Actual           float64 `json:"actual"`
+    Surprise         float64 `json:"surprise"`
+    SurprisePct      float64 `json:"surprise_percent"`
+    NextDayChangePct float64 `json:"next_day_change_pct,omitempty"`
 }
 
 // sanitizedRecommendation is the analyst consensus in the prompt payload.
@@ -522,6 +550,9 @@ const maxPromptTotalRuneLen = 6000 // increased from 4000
 
 ## New Functions
 
+> **Non-normative.** Function signatures are design guidance; check the source
+> files for current implementations.
+
 ### In `stock_fundamentals.go` (new file)
 
 Finnhub fundamentals are split into a dedicated file. `stock.go` is already ~700
@@ -607,6 +638,8 @@ input := &stockAnalysisInput{
 
 ## Test Additions
 
+> **Non-normative.** Test names describe intent — actual names may vary.
+
 ### In `stock_analysis_test.go`
 
 | Test | Description |
@@ -655,6 +688,9 @@ validation.
 
 ## Implementation Order
 
+> **Non-normative.** Build sequence guidance. Step boundaries may shift during
+> implementation; tests are written alongside each step.
+
 ### Step 1: Finnhub Fundamental Fetch Functions (new file: `stock_fundamentals.go`)
 
 1. Create `internal/bot/stock_fundamentals.go`
@@ -669,9 +705,9 @@ validation.
 
 ### Step 2: Sanitized Types + Sanitization (stock_analysis.go)
 
-1. Add sanitized types: `sanitizedMetrics`, `sanitizedEarningsHistory`, `sanitizedRecommendation`
+1. Add sanitized types: `sanitizedMetrics`, `sanitizedRecommendation`, `sanitizedPriceTarget`, `EarningsReaction`
 2. Update `stockAnalysisInput` and `analysisPromptPayload` with new fields
-3. Implement `sanitizeMetrics`, `earningsToSanitized`, `recommendationToSanitized`
+3. Implement `sanitizeMetrics`, `recommendationToSanitized`, `priceTargetToSanitized`, `earningsToReactions`
 4. Update `sanitizeAnalysisInput` to call new sanitizers
 5. Write sanitization tests
 6. Run `mise run test`, `mise run test-race`
@@ -700,6 +736,8 @@ validation.
 11. Run `mise test-integration 2>&1 | grep -w 'FAIL:'`
 
 ## File Size Estimates
+
+> **Non-normative.** Rough order-of-magnitude estimates for scoping only.
 
 | File | Change | Est. Lines |
 |---|---|---|

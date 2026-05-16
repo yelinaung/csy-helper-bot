@@ -376,8 +376,8 @@ func recommendationToSanitized(rec *RecommendationTrend) *sanitizedRecommendatio
 // upside percentage server-side. quoteCurrentPrice is the actual current
 // price from the fetched quote — Finnhub /stock/price-target may omit
 // lastPrice, so we use the separate quote fetch for the current price.
-// Returns nil if pt is nil or the current price is zero/negative
-// (to guard against +Inf/NaN in JSON).
+// Returns nil if pt is nil. When the current price is zero/negative,
+// UpsidePct is omitted from JSON to guard against +Inf/NaN.
 func priceTargetToSanitized(pt *PriceTarget, quoteCurrentPrice float64) *sanitizedPriceTarget {
 	if pt == nil {
 		return nil

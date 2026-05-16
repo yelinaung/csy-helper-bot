@@ -1975,6 +1975,102 @@ func TestBuildAnalysisPrompt_PromptBudgetDropsRecommendation(t *testing.T) {
 	}
 }
 
+func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
+	// Validate each stage of the documented cascade:
+	// recommendation → price-target → earnings → metrics → news.
+	// Each subtest uses progressively smaller inputs so the earlier stages
+	// don't need to be dropped, isolating the intended stage.
+
+	baseMetrics := &FinancialMetrics{
+		PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42,
+		RevenuePerShareTTM: 25.0, NetProfitMarginTTM: 25.8,
+		ROETTM: 145.0, ROATTM: 30.0, DebtToEquityTTM: 1.2,
+		CurrentRatioTTM: 1.3, BookValuePerShareQ: 3.0, Beta: 1.3,
+		High52W: 260.0, Low52W: 164.0, DividendYieldIndicated: 0.44,
+		RevenueGrowthTTM: 10.0, EPSGrowthTTM: 15.0, MarketCapM: 3000000,
+	}
+
+	t.Run("drops-price-target-when-rec-already-nil", func(t *testing.T) {
+		// No recommendation, but price-target + metrics + many news
+		// items overflow the budget. Price-target is next in cascade.
+		items := make([]newsHighlight, 0, 40)
+		for range 40 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("X", 140),
+				URL:        "https://x.com",
+				Highlights: []string{strings.Repeat("X", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:      testSymbolAAPL,
+			Quote:       &StockQuote{CurrentPrice: 150.00},
+			Metrics:     baseMetrics,
+			PriceTarget: &PriceTarget{TargetHigh: 250, TargetLow: 200, TargetMean: 225, CurrentPrice: 150},
+			NewsItems:   items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"price_target"`) {
+			t.Error("price_target should have been dropped (next after absent recommendation)")
+		}
+	})
+
+	t.Run("drops-earnings-when-rec-and-pt-absent", func(t *testing.T) {
+		// No recommendation or price-target. Earnings + metrics + news
+		// overflow. Earnings is next in cascade.
+		items := make([]newsHighlight, 0, 45)
+		for range 45 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("Y", 140),
+				URL:        "https://y.com",
+				Highlights: []string{strings.Repeat("Y", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:    testSymbolAAPL,
+			Quote:     &StockQuote{CurrentPrice: 150.00},
+			Metrics:   baseMetrics,
+			Earnings:  []EarningsEntry{{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35}},
+			NewsItems: items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-2")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"earnings_history"`) {
+			t.Error("earnings_history should have been dropped (next after absent rec/price-target)")
+		}
+	})
+
+	t.Run("drops-metrics-when-earnings-also-absent", func(t *testing.T) {
+		// No recommendation, price-target, or earnings. Metrics + news
+		// overflow. Metrics is next in cascade.
+		items := make([]newsHighlight, 0, 50)
+		for range 50 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("Z", 140),
+				URL:        "https://z.com",
+				Highlights: []string{strings.Repeat("Z", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:    testSymbolAAPL,
+			Quote:     &StockQuote{CurrentPrice: 150.00},
+			Metrics:   baseMetrics,
+			NewsItems: items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-3")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"metrics"`) {
+			t.Error("metrics should have been dropped (last before news)")
+		}
+	})
+}
+
 func TestBuildAnalysisPrompt_TLDRFirst(t *testing.T) {
 	input := &stockAnalysisInput{
 		Symbol: testSymbolAAPL,

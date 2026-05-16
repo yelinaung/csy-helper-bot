@@ -643,7 +643,7 @@ input := &stockAnalysisInput{
 ### In `stock_analysis_test.go`
 
 | Test | Description | Tier |
-|---|---|---|---|
+|---|---|---|
 | `TestBuildAnalysisPrompt_WithMetrics` | Prompt includes metrics JSON fields | |
 | `TestBuildAnalysisPrompt_WithEarnings` | Prompt includes earnings history JSON | |
 | `TestBuildAnalysisPrompt_WithPriceTarget` | Prompt includes price target JSON with upside% | Tier 1 |

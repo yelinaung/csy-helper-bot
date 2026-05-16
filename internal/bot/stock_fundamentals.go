@@ -300,16 +300,19 @@ func fetchEarningsReactions(
 		entry  EarningsEntry
 		period time.Time
 	}
-	parsed := make([]parsedEntry, 0, len(entries))
+	parsed := make([]parsedEntry, len(entries))
 	var minPeriod, maxPeriod time.Time
-	for _, e := range entries {
+	validCount := 0
+	for i, e := range entries {
+		parsed[i].entry = e
 		p, parseErr := time.Parse(dateFormatPattern, e.Period)
 		if parseErr != nil {
 			log.Warn().Err(parseErr).Str("period", e.Period).Str("symbol", symbol).
 				Msg("Failed to parse earnings period date")
 			continue
 		}
-		parsed = append(parsed, parsedEntry{entry: e, period: p})
+		parsed[i].period = p
+		validCount++
 		if minPeriod.IsZero() || p.Before(minPeriod) {
 			minPeriod = p
 		}
@@ -317,7 +320,7 @@ func fetchEarningsReactions(
 			maxPeriod = p
 		}
 	}
-	if len(parsed) == 0 || minPeriod.IsZero() {
+	if validCount == 0 || minPeriod.IsZero() {
 		// All periods failed to parse — return entries with zero reaction.
 		reactions := make([]EarningsReaction, 0, len(entries))
 		for _, e := range entries {
@@ -342,6 +345,10 @@ func fetchEarningsReactions(
 	// period date (report close) and the first bar after (next-day close).
 	reactions := make([]EarningsReaction, 0, len(entries))
 	for _, pe := range parsed {
+		if pe.period.IsZero() {
+			reactions = append(reactions, earningsReactionFromEntry(pe.entry, 0))
+			continue
+		}
 		nextDayPct := 0.0
 		var reportClose, nextClose float64
 		for _, bar := range bars {

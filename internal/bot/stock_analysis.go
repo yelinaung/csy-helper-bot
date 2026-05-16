@@ -276,7 +276,7 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 	if len(input.EarningsRxns) > 0 {
 		payload.Earnings = input.EarningsRxns
 	} else if len(input.Earnings) > 0 {
-		payload.Earnings = earningsToReactions(input.Earnings, nil)
+		payload.Earnings = earningsToReactions(input.Earnings)
 	}
 
 	if input.Recommendation != nil {
@@ -339,7 +339,7 @@ func sanitizeMetrics(m *FinancialMetrics) *sanitizedMetrics {
 // computation lives in fetchEarningsReactions, whose result is passed
 // through EarningsRxns. This function exists to handle the fallback path
 // where Databento is not configured.
-func earningsToReactions(entries []EarningsEntry, _ map[string][]HistoricalBar) []EarningsReaction {
+func earningsToReactions(entries []EarningsEntry) []EarningsReaction {
 	reactions := make([]EarningsReaction, 0, len(entries))
 	for i, e := range entries {
 		if i >= 4 {

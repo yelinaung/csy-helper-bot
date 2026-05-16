@@ -1526,7 +1526,7 @@ func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
 	// The testBotServer captures the text sent; it should be the raw
 	// "test" plus the server-appended disclaimer (italic markers stripped
 	// by plaintelegramMarkdownText in the fallback path).
-	expected := "test\n\nⓘ This is AI-generated content, not financial advice. Verify before making investment decisions."
+	expected := expectedFallbackMessage("test")
 	if srv.lastMessage != expected {
 		t.Fatalf("expected plaintext fallback %q, got %q", expected, srv.lastMessage)
 	}
@@ -1648,7 +1648,7 @@ func TestSendOrEditAnalysisResult_SendFallback(t *testing.T) {
 	}
 	// The last message captured should be "hello" plus the server-appended
 	// disclaimer (italic markers stripped by plaintext fallback).
-	expected := "hello\n\nⓘ This is AI-generated content, not financial advice. Verify before making investment decisions."
+	expected := expectedFallbackMessage("hello")
 	if srv.lastMessage != expected {
 		t.Fatalf("expected %q from fallback, got %q", expected, srv.lastMessage)
 	}
@@ -1714,7 +1714,7 @@ func TestSendOrEditAnalysisResult_SendV2FailFallback(t *testing.T) {
 	if srv.requestCount() < 2 {
 		t.Fatalf("expected at least 2 API calls (V2 fail + plaintext fallback), got %d", srv.requestCount())
 	}
-	expected := "final-message\n\nⓘ This is AI-generated content, not financial advice. Verify before making investment decisions."
+	expected := expectedFallbackMessage("final-message")
 	if srv.lastMessage != expected {
 		t.Fatalf("expected plaintext fallback %q, got %q", expected, srv.lastMessage)
 	}
@@ -1858,7 +1858,7 @@ func TestBuildAnalysisPrompt_WithEarnings(t *testing.T) {
 		Symbol:       testSymbolAAPL,
 		Quote:        &StockQuote{CurrentPrice: 150.00},
 		Earnings:     earnings,
-		EarningsRxns: earningsToReactions(earnings, nil),
+		EarningsRxns: earningsToReactions(earnings),
 	}
 
 	prompt, err := buildAnalysisPrompt(input, "nonce-nil-bars")
@@ -1905,9 +1905,24 @@ func TestBuildAnalysisPrompt_WithPriceTarget(t *testing.T) {
 	if !strings.Contains(prompt, `"target_mean": 225`) {
 		t.Error("prompt should contain target_mean")
 	}
-	// Upside: (225/187 - 1) * 100 = 20.32...
-	if !strings.Contains(prompt, `"upside_percent": 20.32`) {
-		t.Error("prompt should contain computed upside_percent")
+	// Parse the JSON payload and assert upside numerically.
+	payload := extractPayloadJSON(t, prompt)
+	var parsed struct {
+		PriceTarget struct {
+			UpsidePct float64 `json:"upside_percent"`
+		} `json:"price_target"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("failed to parse payload JSON: %v", err)
+	}
+	// (225/187 - 1) * 100 = 20.320855...
+	expectedUpside := (225.0/187.0 - 1) * 100
+	diff := parsed.PriceTarget.UpsidePct - expectedUpside
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 0.01 {
+		t.Errorf("expected upside_percent ~%.4f, got %.4f", expectedUpside, parsed.PriceTarget.UpsidePct)
 	}
 }
 
@@ -2150,7 +2165,7 @@ func TestEarningsToReactions_Normal(t *testing.T) {
 	// barsByPeriod is ignored by the simplified function — NextDayChangePct
 	// is always zero in this path. The Databento-based computation lives
 	// exclusively in fetchEarningsReactions.
-	got := earningsToReactions(entries, nil)
+	got := earningsToReactions(entries)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 reaction, got %d", len(got))
 	}
@@ -2169,7 +2184,7 @@ func TestEarningsToReactions_PartialBars(t *testing.T) {
 	}
 
 	// NextDayChangePct is always zero in this simplified path.
-	got := earningsToReactions(entries, nil)
+	got := earningsToReactions(entries)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 reactions, got %d", len(got))
 	}
@@ -2192,7 +2207,7 @@ func TestEarningsToReactions_CappedAt4(t *testing.T) {
 		}
 	}
 
-	got := earningsToReactions(entries, nil)
+	got := earningsToReactions(entries)
 	if len(got) != 4 {
 		t.Fatalf("expected 4 reactions (capped), got %d", len(got))
 	}
@@ -2475,4 +2490,18 @@ func TestStockAnalysisHandler_SuccessWithFundamentals(t *testing.T) {
 	if !strings.Contains(srv.lastMessage, "AAPL") {
 		t.Fatalf("expected analysis containing AAPL, got %q", srv.lastMessage)
 	}
+}
+
+func expectedFallbackMessage(prefix string) string {
+	return prefix + "\n\n" + plainTelegramMarkdownText(analysisDisclaimer)
+}
+
+func extractPayloadJSON(t *testing.T, prompt string) []byte {
+	t.Helper()
+	start := strings.Index(prompt, "{")
+	end := strings.LastIndex(prompt, "}")
+	if start == -1 || end == -1 || start >= end {
+		t.Fatal("JSON payload not found in prompt")
+	}
+	return []byte(prompt[start : end+1])
 }

@@ -926,6 +926,10 @@ func TestFetchFinancialMetrics_Success(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubMetricsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -959,6 +963,10 @@ func TestFetchFinancialMetrics_Success(t *testing.T) {
 
 func TestFetchFinancialMetrics_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubMetricsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -979,6 +987,10 @@ func TestFetchEarningsHistory_Success(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubEarningsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1008,6 +1020,10 @@ func TestFetchEarningsHistory_Success(t *testing.T) {
 
 func TestFetchEarningsHistory_EmptyArray(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubEarningsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]EarningsEntry{})
 	}))
@@ -1032,6 +1048,10 @@ func TestFetchRecommendation_Success(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1061,6 +1081,10 @@ func TestFetchRecommendation_Success(t *testing.T) {
 
 func TestFetchRecommendation_EmptyArray(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]RecommendationTrend{})
 	}))
@@ -1080,6 +1104,10 @@ func TestFetchRecommendation_EmptyArray(t *testing.T) {
 
 func TestFetchRecommendation_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -1103,6 +1131,10 @@ func TestFetchPriceTarget_Success(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubPriceTargetPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1159,5 +1191,30 @@ func TestFetchPriceTarget_MissingAPIKey(t *testing.T) {
 	_, err := fetchPriceTarget(context.Background(), testSymbolAAPL)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestFetchPriceTarget_ZeroTargets_ReturnsNil(t *testing.T) {
+	mockPT := PriceTarget{} // All fields zero.
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubPriceTargetPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockPT)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchPriceTarget(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result for all-zero price target (no analyst coverage)")
 	}
 }

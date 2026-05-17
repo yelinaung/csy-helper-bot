@@ -1810,6 +1810,7 @@ func TestAllow_ExistingKeyAtLimit(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_WithMetrics(t *testing.T) {
+	t.Parallel()
 	mockMetrics := &FinancialMetrics{
 		PEExclExtraTTM:         28.5,
 		EPSExclExtraTTM:        6.42,
@@ -1849,6 +1850,7 @@ func TestBuildAnalysisPrompt_WithMetrics(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_WithEarnings(t *testing.T) {
+	t.Parallel()
 	earnings := []EarningsEntry{
 		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
 		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
@@ -1881,6 +1883,7 @@ func TestBuildAnalysisPrompt_WithEarnings(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_WithPriceTarget(t *testing.T) {
+	t.Parallel()
 	pt := &PriceTarget{
 		TargetHigh:   250,
 		TargetLow:    200,
@@ -1976,6 +1979,7 @@ func TestBuildAnalysisPrompt_PromptBudgetDropsRecommendation(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
+	t.Parallel()
 	// Validate each stage of the documented cascade:
 	// recommendation → price-target → earnings → metrics → news.
 	// Each subtest uses progressively smaller inputs so the earlier stages
@@ -1991,6 +1995,7 @@ func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
 	}
 
 	t.Run("drops-price-target-when-rec-already-nil", func(t *testing.T) {
+		t.Parallel()
 		// No recommendation, but price-target + metrics + many news
 		// items overflow the budget. Price-target is next in cascade.
 		items := make([]newsHighlight, 0, 40)
@@ -2018,6 +2023,7 @@ func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
 	})
 
 	t.Run("drops-earnings-when-rec-and-pt-absent", func(t *testing.T) {
+		t.Parallel()
 		// No recommendation or price-target. Earnings + metrics + news
 		// overflow. Earnings is next in cascade.
 		items := make([]newsHighlight, 0, 45)
@@ -2045,6 +2051,7 @@ func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
 	})
 
 	t.Run("drops-metrics-when-earnings-also-absent", func(t *testing.T) {
+		t.Parallel()
 		// No recommendation, price-target, or earnings. Metrics + news
 		// overflow. Metrics is next in cascade.
 		items := make([]newsHighlight, 0, 50)
@@ -2072,6 +2079,7 @@ func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_TLDRFirst(t *testing.T) {
+	t.Parallel()
 	input := &stockAnalysisInput{
 		Symbol: testSymbolAAPL,
 		Quote:  &StockQuote{CurrentPrice: 150.00},
@@ -2090,6 +2098,7 @@ func TestBuildAnalysisPrompt_TLDRFirst(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_NoDisclaimerInstruction(t *testing.T) {
+	t.Parallel()
 	input := &stockAnalysisInput{
 		Symbol: testSymbolAAPL,
 		Quote:  &StockQuote{CurrentPrice: 150.00},
@@ -2108,6 +2117,7 @@ func TestBuildAnalysisPrompt_NoDisclaimerInstruction(t *testing.T) {
 }
 
 func TestBuildAnalysisPrompt_WithRecommendation(t *testing.T) {
+	t.Parallel()
 	rec := &RecommendationTrend{
 		Period: testRecommendPeriod, StrongBuy: 15, Buy: 20,
 		Hold: 5, Sell: 2, StrongSell: 1,
@@ -2132,6 +2142,7 @@ func TestBuildAnalysisPrompt_WithRecommendation(t *testing.T) {
 }
 
 func TestSanitizeMetrics_Passthrough(t *testing.T) {
+	t.Parallel()
 	m := &FinancialMetrics{
 		PEExclExtraTTM:         28.5,
 		EPSExclExtraTTM:        6.42,
@@ -2166,6 +2177,7 @@ func TestSanitizeMetrics_Passthrough(t *testing.T) {
 }
 
 func TestSanitizeMetrics_NilInput(t *testing.T) {
+	t.Parallel()
 	got := sanitizeMetrics(nil)
 	if got != nil {
 		t.Fatal("expected nil for nil input")
@@ -2173,6 +2185,7 @@ func TestSanitizeMetrics_NilInput(t *testing.T) {
 }
 
 func TestPriceTargetToSanitized_ComputesUpside(t *testing.T) {
+	t.Parallel()
 	pt := &PriceTarget{
 		TargetHigh:   250,
 		TargetLow:    200,
@@ -2200,6 +2213,7 @@ func TestPriceTargetToSanitized_ComputesUpside(t *testing.T) {
 }
 
 func TestPriceTargetToSanitized_NilInput(t *testing.T) {
+	t.Parallel()
 	got := priceTargetToSanitized(nil, 0)
 	if got != nil {
 		t.Fatal("expected nil for nil input")
@@ -2207,6 +2221,7 @@ func TestPriceTargetToSanitized_NilInput(t *testing.T) {
 }
 
 func TestPriceTargetToSanitized_ZeroPriceGuardsInf(t *testing.T) {
+	t.Parallel()
 	pt := &PriceTarget{
 		TargetHigh:   250,
 		TargetLow:    200,
@@ -2230,6 +2245,7 @@ func TestPriceTargetToSanitized_ZeroPriceGuardsInf(t *testing.T) {
 }
 
 func TestRecommendationToSanitized_NilInput(t *testing.T) {
+	t.Parallel()
 	got := recommendationToSanitized(nil)
 	if got != nil {
 		t.Fatal("expected nil for nil input")
@@ -2237,6 +2253,7 @@ func TestRecommendationToSanitized_NilInput(t *testing.T) {
 }
 
 func TestRecommendationToSanitized_Normal(t *testing.T) {
+	t.Parallel()
 	rec := &RecommendationTrend{
 		Period: testRecommendPeriod, StrongBuy: 15, Buy: 20,
 		Hold: 5, Sell: 2, StrongSell: 1,
@@ -2254,6 +2271,7 @@ func TestRecommendationToSanitized_Normal(t *testing.T) {
 }
 
 func TestEarningsToReactions_Normal(t *testing.T) {
+	t.Parallel()
 	entries := []EarningsEntry{
 		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
 	}
@@ -2274,6 +2292,7 @@ func TestEarningsToReactions_Normal(t *testing.T) {
 }
 
 func TestEarningsToReactions_PartialBars(t *testing.T) {
+	t.Parallel()
 	entries := []EarningsEntry{
 		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
 		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
@@ -2293,6 +2312,7 @@ func TestEarningsToReactions_PartialBars(t *testing.T) {
 }
 
 func TestEarningsToReactions_CappedAt4(t *testing.T) {
+	t.Parallel()
 	entries := make([]EarningsEntry, 6)
 	for i := range entries {
 		entries[i] = EarningsEntry{
@@ -2310,6 +2330,7 @@ func TestEarningsToReactions_CappedAt4(t *testing.T) {
 }
 
 func TestSendOrEditAnalysisResult_HardcodedDisclaimer(t *testing.T) {
+	t.Parallel()
 	b, srv := newTestBot(t)
 
 	update := &models.Update{

@@ -521,8 +521,11 @@ Extracts target fields from Finnhub's response. Computes `UpsidePct` as
 
 Adds calls to `sanitizeMetrics`, `recommendationToSanitized`, and
 `priceTargetToSanitized` when the corresponding input fields are non-nil.
-Earnings reactions are already pre-computed by `earningsToReactions` and
-passed directly into `analysisPromptPayload.Earnings`. The function
+Earnings reactions are pre-computed by `fetchEarningsReactions` (the public
+entry point that fetches Databento bars); when Databento is not configured
+the internal fallback `earningsToReactions` passes through entries with
+zeroed next-day moves, which are then passed directly into
+`analysisPromptPayload.Earnings`. The function
 populates `payload.Metrics`, `payload.Earnings`, `payload.Recommendation`,
 and `payload.PriceTarget`.
 

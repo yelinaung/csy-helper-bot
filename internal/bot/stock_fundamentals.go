@@ -285,6 +285,8 @@ func fetchPriceTarget(ctx context.Context, symbol string) (*PriceTarget, error) 
 // the actual post-announcement move.
 // Returns partial results when Databento is unavailable or when bars
 // for a given period cannot be fetched.
+//
+//nolint:unused // Kept for re-enablement when actual announcement dates are available.
 func fetchEarningsReactions(
 	ctx context.Context,
 	symbol string,
@@ -320,7 +322,7 @@ func fetchEarningsReactions(
 			maxPeriod = p
 		}
 	}
-	if validCount == 0 || minPeriod.IsZero() {
+	if validCount == 0 {
 		// All periods failed to parse — return entries with zero reaction.
 		reactions := make([]EarningsReaction, 0, len(entries))
 		for _, e := range entries {
@@ -370,6 +372,8 @@ func fetchEarningsReactions(
 
 // fetchBarsByDateRange fetches historical bars from Databento for a given
 // date range and returns the sorted bars.
+//
+//nolint:unused // Called only by fetchEarningsReactions (which is also unused).
 func fetchBarsByDateRange(
 	ctx context.Context,
 	symbol, apiKey string,
@@ -427,6 +431,8 @@ func fetchBarsByDateRange(
 }
 
 // earningsReactionFromEntry creates an EarningsReaction from an EarningsEntry.
+//
+//nolint:unused // Private helper for fetchEarningsReactions.
 func earningsReactionFromEntry(e EarningsEntry, nextDayChangePct float64) EarningsReaction {
 	return EarningsReaction{
 		Period:           e.Period,

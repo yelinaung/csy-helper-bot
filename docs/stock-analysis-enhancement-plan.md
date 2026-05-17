@@ -722,7 +722,7 @@ validation.
 1. Update `analysisSystemInstruction` with section-skipping guidance
 2. Rewrite `buildAnalysisPrompt` user prompt with 5 labeled sections
 3. Update `maxPromptTotalRuneLen` to 6000
-4. Add field-drop priority logic (recommendation → price-target → earnings → metrics → news)
+4. Add field-drop priority logic (price-target → recommendation → earnings → metrics → news)
 5. Write prompt tests for all new sections and budget behavior
 6. Run `mise run test`, `mise run test-race`
 

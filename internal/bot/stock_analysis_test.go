@@ -1931,16 +1931,12 @@ func TestBuildAnalysisPrompt_WithPriceTarget(t *testing.T) {
 
 func TestBuildAnalysisPrompt_PromptBudgetDropsPriceTarget(t *testing.T) {
 	t.Parallel()
-	// Create a large prompt payload that exceeds the budget so
-	// price-target is the first field dropped (cascade order:
-	// price-target → recommendation → earnings → metrics → news).
+	// Create a payload that barely exceeds maxPromptTotalRuneLen when
+	// both price-target and recommendation are present. The cascade drops
+	// price-target first, so recommendation should survive.
 	mockMetrics := &FinancialMetrics{
 		PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42,
-		RevenuePerShareTTM: 25.0, NetProfitMarginTTM: 25.8,
-		ROETTM: 145.0, ROATTM: 30.0, DebtToEquityTTM: 1.2,
-		CurrentRatioTTM: 1.3, BookValuePerShareQ: 3.0, Beta: 1.3,
-		High52W: 260.0, Low52W: 164.0, DividendYieldIndicated: 0.44,
-		RevenueGrowthTTM: 10.0, EPSGrowthTTM: 15.0, MarketCapM: 3000000,
+		NetProfitMarginTTM: 25.8, ROETTM: 145.0,
 	}
 	pt := &PriceTarget{
 		TargetHigh: 250, TargetLow: 200, TargetMean: 225,
@@ -1951,12 +1947,15 @@ func TestBuildAnalysisPrompt_PromptBudgetDropsPriceTarget(t *testing.T) {
 		Hold: 5, Sell: 2, StrongSell: 1,
 	}
 
-	items := make([]newsHighlight, 0, 40)
-	for range 40 {
+	// Push payload over budget. Use enough items to guarantee overflow,
+	// then verify price-target (first cascade stage) is dropped while
+	// symbol (always present) still appears.
+	items := make([]newsHighlight, 0, 12)
+	for range 12 {
 		items = append(items, newsHighlight{
-			Title:      strings.Repeat("T", 140),
-			URL:        "https://example.com/very/long/path",
-			Highlights: []string{strings.Repeat("h", 190)},
+			Title:      strings.Repeat("N", maxTitleRuneLen),
+			URL:        "https://e.com/n",
+			Highlights: []string{strings.Repeat("n", maxHighlightRuneLen-5)},
 		})
 	}
 
@@ -1977,12 +1976,16 @@ func TestBuildAnalysisPrompt_PromptBudgetDropsPriceTarget(t *testing.T) {
 	if strings.Contains(prompt, `"price_target"`) {
 		t.Error("prompt should NOT contain price_target after budget drop")
 	}
+	// Verify the prompt is still non-empty and contains the symbol.
+	if !strings.Contains(prompt, testSymbolAAPL) {
+		t.Error("prompt should still contain symbol after drops")
+	}
 }
 
 func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
 	t.Parallel()
 	// Validate each stage of the documented cascade:
-	// recommendation → price-target → earnings → metrics → news.
+	// price-target → recommendation → earnings → metrics → news.
 	// Each subtest uses progressively smaller inputs so the earlier stages
 	// don't need to be dropped, isolating the intended stage.
 

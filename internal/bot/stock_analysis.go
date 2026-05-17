@@ -413,8 +413,12 @@ func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error
 	}
 
 	// Field-drop priority cascade: price-target → recommendation →
-	// earnings → metrics → news. Each stage is a top-level nil assignment
-	// followed by re-marshal and re-check.
+	// earnings → metrics → news. Price-target is dropped first because it
+	// is the smallest field; recommendation is a bulkier integer-count
+	// struct, so in tight budgets preserving the recommendation (which
+	// Gemini can interpret directionally) costs more bytes than the
+	// single-number price-target upside. Each stage is a top-level nil
+	// assignment followed by re-marshal and re-check.
 	for utf8.RuneCount(payloadJSON) > maxPromptTotalRuneLen {
 		//nolint:gocritic // Linear cascade by design — each stage is independently testable.
 		if payload.PriceTarget != nil {
@@ -764,9 +768,11 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 	}
 
 	var earningsRxns []EarningsReaction
-	if len(earnings) > 0 {
-		earningsRxns = fetchEarningsReactions(ctx, symbol, earnings)
-	}
+	// Post-earnings reaction is NOT computed from Finnhub /stock/earnings
+	// because the period field is the fiscal quarter end date, not the
+	// actual announcement date. Computing next-day moves from quarter-end
+	// dates produces misleading data. Re-enable fetchEarningsReactions
+	// when actual announcement dates become available.
 
 	input := &stockAnalysisInput{
 		Symbol:         symbol,

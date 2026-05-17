@@ -17,10 +17,23 @@ import (
 )
 
 const (
-	testSymbolAAPL      = "AAPL"
-	testErrInvalidUsage = "invalid usage"
-	testProfileName     = "Apple Inc"
-	testStockCommand    = "!sa AAPL"
+	testSymbolAAPL         = "AAPL"
+	testErrInvalidUsage    = "invalid usage"
+	testProfileName        = "Apple Inc"
+	testStockCommand       = "!sa AAPL"
+	testIndustryTechnology = "Technology"
+
+	// Finnhub API endpoint paths used across test fixtures.
+	finnhubQuotePath       = "/api/v1/quote"
+	finnhubProfilePath     = "/api/v1/stock/profile2"
+	finnhubMetricsPath     = "/api/v1/stock/metric"
+	finnhubEarningsPath    = "/api/v1/stock/earnings"
+	finnhubRecommendPath   = "/api/v1/stock/recommendation"
+	finnhubPriceTargetPath = "/api/v1/stock/price-target"
+
+	// Shared earnings mock data period to reduce goconst.
+	testEarningsPeriod1 = "2026-03-31"
+	testRecommendPeriod = "2026-05"
 )
 
 type rewriteHostTransport struct {
@@ -259,7 +272,7 @@ func TestFormatStockMessage_PositiveChange(t *testing.T) {
 	profile := &CompanyProfile{
 		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
-		Industry:             "Technology",
+		Industry:             testIndustryTechnology,
 	}
 
 	msg := formatStockMessage(testSymbolAAPL, quote, profile)
@@ -412,7 +425,7 @@ func TestFetchCompanyProfile(t *testing.T) {
 	mockProfile := CompanyProfile{
 		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
-		Industry:             "Technology",
+		Industry:             testIndustryTechnology,
 		Exchange:             "NASDAQ",
 	}
 
@@ -590,7 +603,7 @@ func TestFormatHistoricalSummary_WithProfile(t *testing.T) {
 	profile := &CompanyProfile{
 		Name:                 "Microsoft Corporation",
 		MarketCapitalization: 439620,
-		Industry:             "Technology",
+		Industry:             testIndustryTechnology,
 	}
 
 	got := formatHistoricalSummary("MSFT", 7, bars, profile)
@@ -896,4 +909,312 @@ func TestLogAllowedGroups(t *testing.T) {
 
 	// Verify no panic — if we got here the function worked.
 	_ = fmt.Sprintf("logged %d groups", len(allowedGroups))
+}
+
+func TestFetchFinancialMetrics_Success(t *testing.T) {
+	mockMetrics := financialMetricsResponse{
+		Metric: FinancialMetrics{
+			PEExclExtraTTM:     28.5,
+			EPSExclExtraTTM:    6.42,
+			NetProfitMarginTTM: 25.8,
+			ROETTM:             145.0,
+			DebtToEquityTTM:    1.2,
+			Beta:               1.3,
+			High52W:            260.0,
+			Low52W:             164.0,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubMetricsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("metric") != "all" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockMetrics)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchFinancialMetrics(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil FinancialMetrics")
+	}
+	if result.PEExclExtraTTM != 28.5 {
+		t.Errorf("expected PE 28.5, got %f", result.PEExclExtraTTM)
+	}
+	if result.ROETTM != 145.0 {
+		t.Errorf("expected ROE 145.0, got %f", result.ROETTM)
+	}
+}
+
+func TestFetchFinancialMetrics_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubMetricsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	_, err := fetchFinancialMetrics(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestFetchEarningsHistory_Success(t *testing.T) {
+	mockEarnings := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
+		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubEarningsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockEarnings)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchEarningsHistory(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 earnings entries, got %d", len(result))
+	}
+	if result[0].Period != "2026-03-31" {
+		t.Errorf("expected period 2026-03-31, got %s", result[0].Period)
+	}
+	if result[0].Actual != 2.40 {
+		t.Errorf("expected actual 2.40, got %f", result[0].Actual)
+	}
+}
+
+func TestFetchEarningsHistory_EmptyArray(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubEarningsPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]EarningsEntry{})
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchEarningsHistory(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error for empty array: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 entries for empty array, got %d", len(result))
+	}
+}
+
+func TestFetchRecommendation_Success(t *testing.T) {
+	mockRec := []RecommendationTrend{
+		{Period: testRecommendPeriod, StrongBuy: 15, Buy: 20, Hold: 5, Sell: 2, StrongSell: 1},
+		{Period: "2026-04", StrongBuy: 14, Buy: 19, Hold: 6, Sell: 3, StrongSell: 1},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockRec)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchRecommendation(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil recommendation (first element)")
+	}
+	if result.Period != testRecommendPeriod {
+		t.Errorf("expected first period 2026-05, got %s", result.Period)
+	}
+	if result.StrongBuy != 15 {
+		t.Errorf("expected strongBuy 15, got %d", result.StrongBuy)
+	}
+}
+
+func TestFetchRecommendation_EmptyArray(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]RecommendationTrend{})
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchRecommendation(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil for empty array")
+	}
+}
+
+func TestFetchRecommendation_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubRecommendPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	_, err := fetchRecommendation(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+func TestFetchPriceTarget_Success(t *testing.T) {
+	mockPT := PriceTarget{
+		TargetHigh:   250,
+		TargetLow:    200,
+		TargetMean:   225,
+		TargetMedian: 228,
+		CurrentPrice: 187,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubPriceTargetPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("symbol") != testSymbolAAPL {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockPT)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchPriceTarget(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil PriceTarget")
+	}
+	if result.TargetHigh != 250 {
+		t.Errorf("expected targetHigh 250, got %f", result.TargetHigh)
+	}
+	if result.CurrentPrice != 187 {
+		t.Errorf("expected currentPrice 187, got %f", result.CurrentPrice)
+	}
+}
+
+func TestFetchFinancialMetrics_MissingAPIKey(t *testing.T) {
+	t.Setenv("FINNHUB_API_KEY", "")
+	_, err := fetchFinancialMetrics(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestFetchEarningsHistory_MissingAPIKey(t *testing.T) {
+	t.Setenv("FINNHUB_API_KEY", "")
+	_, err := fetchEarningsHistory(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestFetchRecommendation_MissingAPIKey(t *testing.T) {
+	t.Setenv("FINNHUB_API_KEY", "")
+	_, err := fetchRecommendation(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestFetchPriceTarget_MissingAPIKey(t *testing.T) {
+	t.Setenv("FINNHUB_API_KEY", "")
+	_, err := fetchPriceTarget(context.Background(), testSymbolAAPL)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestFetchPriceTarget_ZeroTargets_ReturnsNil(t *testing.T) {
+	mockPT := PriceTarget{} // All fields zero.
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != finnhubPriceTargetPath {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockPT)
+	}))
+	defer server.Close()
+
+	useRedirectedHTTPClient(t, server.URL)
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+
+	result, err := fetchPriceTarget(context.Background(), testSymbolAAPL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result for all-zero price target (no analyst coverage)")
+	}
 }

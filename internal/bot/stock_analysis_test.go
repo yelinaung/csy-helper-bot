@@ -106,7 +106,7 @@ func TestBuildAnalysisPrompt_FullData(t *testing.T) {
 		Profile: &CompanyProfile{
 			Name:                 testProfileName,
 			MarketCapitalization: 3000000,
-			Industry:             "Technology",
+			Industry:             testIndustryTechnology,
 			Exchange:             "NASDAQ",
 		},
 		NewsItems: []newsHighlight{
@@ -983,10 +983,12 @@ func TestSendOrEditAnalysisResult_Truncation(t *testing.T) {
 
 	sendOrEditAnalysisResult(context.Background(), b, update, nil, nil, longText)
 
-	// The text should be truncated to maxAnalysisResponseRuneLength.
+	// The text should be truncated to maxAnalysisResponseRuneLength, then
+	// the disclaimer is appended server-side, so total runes can exceed
+	// maxAnalysisResponseRuneLength by the disclaimer length.
 	got := srv.lastMessage
-	if runeLen(got) > maxAnalysisResponseRuneLength {
-		t.Fatalf("expected text truncated to %d runes, got %d in %q",
+	if runeLen(got) > maxAnalysisResponseRuneLength+runeLen(analysisDisclaimer)+10 {
+		t.Fatalf("expected text truncated to ~%d runes, got %d in %q",
 			maxAnalysisResponseRuneLength, runeLen(got), got)
 	}
 }
@@ -1064,7 +1066,7 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 	mockProfile := CompanyProfile{
 		Name:                 testProfileName,
 		MarketCapitalization: 3000000,
-		Industry:             "Technology",
+		Industry:             testIndustryTechnology,
 		Exchange:             "NASDAQ",
 	}
 	mockExaResp := exaSearchResponse{
@@ -1083,9 +1085,9 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/quote":
+		case finnhubQuotePath:
 			_ = json.NewEncoder(w).Encode(mockQuote)
-		case "/api/v1/stock/profile2":
+		case finnhubProfilePath:
 			_ = json.NewEncoder(w).Encode(mockProfile)
 		default:
 			_ = json.NewEncoder(w).Encode(mockExaResp)
@@ -1179,9 +1181,9 @@ func TestStockAnalysisHandler_ExaFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/quote":
+		case finnhubQuotePath:
 			_ = json.NewEncoder(w).Encode(mockQuote)
-		case "/api/v1/stock/profile2":
+		case finnhubProfilePath:
 			_ = json.NewEncoder(w).Encode(mockProfile)
 		default:
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -1225,9 +1227,9 @@ func TestStockAnalysisHandler_GeminiTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/quote":
+		case finnhubQuotePath:
 			_ = json.NewEncoder(w).Encode(mockQuote)
-		case "/api/v1/stock/profile2":
+		case finnhubProfilePath:
 			_ = json.NewEncoder(w).Encode(mockProfile)
 		default:
 			_ = json.NewEncoder(w).Encode(mockExaResp)
@@ -1271,9 +1273,9 @@ func TestStockAnalysisHandler_GeminiBlocked(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/quote":
+		case finnhubQuotePath:
 			_ = json.NewEncoder(w).Encode(mockQuote)
-		case "/api/v1/stock/profile2":
+		case finnhubProfilePath:
 			_ = json.NewEncoder(w).Encode(mockProfile)
 		default:
 			_ = json.NewEncoder(w).Encode(mockExaResp)
@@ -1521,9 +1523,12 @@ func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
 	}
 
 	// Verify the fallback edit was plaintext (no parse mode).
-	// The testBotServer captures the text sent; it should be the raw "test".
-	if srv.lastMessage != "test" {
-		t.Fatalf("expected plaintext fallback 'test', got %q", srv.lastMessage)
+	// The testBotServer captures the text sent; it should be the raw
+	// "test" plus the server-appended disclaimer (italic markers stripped
+	// by plaintelegramMarkdownText in the fallback path).
+	expected := expectedFallbackMessage("test")
+	if srv.lastMessage != expected {
+		t.Fatalf("expected plaintext fallback %q, got %q", expected, srv.lastMessage)
 	}
 }
 
@@ -1641,9 +1646,11 @@ func TestSendOrEditAnalysisResult_SendFallback(t *testing.T) {
 	if srv.requestCount() < 2 {
 		t.Fatalf("expected at least 2 API calls (edit fail + plaintext edit), got %d", srv.requestCount())
 	}
-	// The last message captured should be "hello" (raw text from plaintext edit).
-	if srv.lastMessage != "hello" {
-		t.Fatalf("expected 'hello' from fallback, got %q", srv.lastMessage)
+	// The last message captured should be "hello" plus the server-appended
+	// disclaimer (italic markers stripped by plaintext fallback).
+	expected := expectedFallbackMessage("hello")
+	if srv.lastMessage != expected {
+		t.Fatalf("expected %q from fallback, got %q", expected, srv.lastMessage)
 	}
 }
 
@@ -1707,8 +1714,9 @@ func TestSendOrEditAnalysisResult_SendV2FailFallback(t *testing.T) {
 	if srv.requestCount() < 2 {
 		t.Fatalf("expected at least 2 API calls (V2 fail + plaintext fallback), got %d", srv.requestCount())
 	}
-	if srv.lastMessage != "final-message" {
-		t.Fatalf("expected plaintext fallback 'final-message', got %q", srv.lastMessage)
+	expected := expectedFallbackMessage("final-message")
+	if srv.lastMessage != expected {
+		t.Fatalf("expected plaintext fallback %q, got %q", expected, srv.lastMessage)
 	}
 }
 
@@ -1799,4 +1807,822 @@ func TestAllow_ExistingKeyAtLimit(t *testing.T) {
 	if retry <= 0 {
 		t.Fatalf("expected positive retryAfter, got %v", retry)
 	}
+}
+
+func TestBuildAnalysisPrompt_WithMetrics(t *testing.T) {
+	t.Parallel()
+	mockMetrics := &FinancialMetrics{
+		PEExclExtraTTM:         28.5,
+		EPSExclExtraTTM:        6.42,
+		NetProfitMarginTTM:     25.8,
+		ROETTM:                 145.0,
+		DebtToEquityTTM:        1.2,
+		Beta:                   1.3,
+		High52W:                260.0,
+		Low52W:                 164.0,
+		DividendYieldIndicated: 0.44,
+		RevenueGrowthTTM:       10.0,
+		EPSGrowthTTM:           15.0,
+	}
+
+	input := &stockAnalysisInput{
+		Symbol:  testSymbolAAPL,
+		Quote:   &StockQuote{CurrentPrice: 150.00},
+		Metrics: mockMetrics,
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-metrics")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, `"pe_ratio"`) {
+		t.Error("prompt should contain pe_ratio")
+	}
+	if !strings.Contains(prompt, `"eps": 6.42`) {
+		t.Error("prompt should contain eps")
+	}
+	if !strings.Contains(prompt, `"roe_pct": 145`) {
+		t.Error("prompt should contain ROE as-is (no multiplication)")
+	}
+	if !strings.Contains(prompt, `"high_52w": 260`) {
+		t.Error("prompt should contain 52-week high")
+	}
+}
+
+func TestBuildAnalysisPrompt_WithEarnings(t *testing.T) {
+	t.Parallel()
+	earnings := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
+		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
+	}
+
+	input := &stockAnalysisInput{
+		Symbol:       testSymbolAAPL,
+		Quote:        &StockQuote{CurrentPrice: 150.00},
+		Earnings:     earnings,
+		EarningsRxns: earningsToReactions(earnings),
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-nil-bars")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, `"earnings_history"`) {
+		t.Error("prompt should contain earnings_history")
+	}
+	if !strings.Contains(prompt, `"period": "2026-03-31"`) {
+		t.Error("prompt should contain earnings period")
+	}
+	if !strings.Contains(prompt, `"surprise_percent": 2.13`) {
+		t.Error("prompt should contain surprise_percent")
+	}
+	// next_day_change_pct should NOT appear since barsByPeriod is empty.
+	if strings.Contains(prompt, `"next_day_change_pct"`) {
+		t.Error("prompt should NOT contain next_day_change_pct when bars not provided")
+	}
+}
+
+func TestBuildAnalysisPrompt_WithPriceTarget(t *testing.T) {
+	t.Parallel()
+	pt := &PriceTarget{
+		TargetHigh:   250,
+		TargetLow:    200,
+		TargetMean:   225,
+		TargetMedian: 228,
+		CurrentPrice: 187,
+	}
+
+	input := &stockAnalysisInput{
+		Symbol:      testSymbolAAPL,
+		Quote:       &StockQuote{CurrentPrice: 187.00},
+		PriceTarget: pt,
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-pt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, `"price_target"`) {
+		t.Error("prompt should contain price_target")
+	}
+	if !strings.Contains(prompt, `"target_mean": 225`) {
+		t.Error("prompt should contain target_mean")
+	}
+	// Parse the JSON payload and assert upside numerically.
+	payload := extractPayloadJSON(t, prompt)
+	var parsed struct {
+		PriceTarget struct {
+			UpsidePct float64 `json:"upside_percent"`
+		} `json:"price_target"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("failed to parse payload JSON: %v", err)
+	}
+	// (225/187 - 1) * 100 = 20.320855...
+	expectedUpside := (225.0/187.0 - 1) * 100
+	diff := parsed.PriceTarget.UpsidePct - expectedUpside
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 0.01 {
+		t.Errorf("expected upside_percent ~%.4f, got %.4f", expectedUpside, parsed.PriceTarget.UpsidePct)
+	}
+}
+
+func TestBuildAnalysisPrompt_PromptBudgetDropsPriceTarget(t *testing.T) {
+	t.Parallel()
+	// Create a payload that barely exceeds maxPromptTotalRuneLen when
+	// both price-target and recommendation are present. The cascade drops
+	// price-target first, so recommendation should survive.
+	mockMetrics := &FinancialMetrics{
+		PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42,
+		NetProfitMarginTTM: 25.8, ROETTM: 145.0,
+	}
+	pt := &PriceTarget{
+		TargetHigh: 250, TargetLow: 200, TargetMean: 225,
+		TargetMedian: 228, CurrentPrice: 187,
+	}
+	rec := &RecommendationTrend{
+		Period: testRecommendPeriod, StrongBuy: 15, Buy: 20,
+		Hold: 5, Sell: 2, StrongSell: 1,
+	}
+
+	// Push payload over budget. Use enough items to guarantee overflow,
+	// then verify price-target (first cascade stage) is dropped while
+	// symbol (always present) still appears.
+	items := make([]newsHighlight, 0, 12)
+	for range 12 {
+		items = append(items, newsHighlight{
+			Title:      strings.Repeat("N", maxTitleRuneLen),
+			URL:        "https://e.com/n",
+			Highlights: []string{strings.Repeat("n", maxHighlightRuneLen-5)},
+		})
+	}
+
+	input := &stockAnalysisInput{
+		Symbol:         testSymbolAAPL,
+		Quote:          &StockQuote{CurrentPrice: 150.00},
+		Metrics:        mockMetrics,
+		Recommendation: rec,
+		PriceTarget:    pt,
+		NewsItems:      items,
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-budget")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Price-target should have been dropped first by the cascade.
+	if strings.Contains(prompt, `"price_target"`) {
+		t.Error("prompt should NOT contain price_target after budget drop")
+	}
+	// Verify the prompt is still non-empty and contains the symbol.
+	if !strings.Contains(prompt, testSymbolAAPL) {
+		t.Error("prompt should still contain symbol after drops")
+	}
+}
+
+func TestBuildAnalysisPrompt_BudgetCascadeStages(t *testing.T) {
+	t.Parallel()
+	// Validate each stage of the documented cascade:
+	// price-target → recommendation → earnings → metrics → news.
+	// Each subtest uses progressively smaller inputs so the earlier stages
+	// don't need to be dropped, isolating the intended stage.
+
+	baseMetrics := &FinancialMetrics{
+		PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42,
+		RevenuePerShareTTM: 25.0, NetProfitMarginTTM: 25.8,
+		ROETTM: 145.0, ROATTM: 30.0, DebtToEquityTTM: 1.2,
+		CurrentRatioTTM: 1.3, BookValuePerShareQ: 3.0, Beta: 1.3,
+		High52W: 260.0, Low52W: 164.0, DividendYieldIndicated: 0.44,
+		RevenueGrowthTTM: 10.0, EPSGrowthTTM: 15.0, MarketCapM: 3000000,
+	}
+
+	t.Run("drops-price-target-when-rec-already-nil", func(t *testing.T) {
+		t.Parallel()
+		// No recommendation, but price-target + metrics + many news
+		// items overflow the budget. Price-target is next in cascade.
+		items := make([]newsHighlight, 0, 40)
+		for range 40 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("X", 140),
+				URL:        "https://x.com",
+				Highlights: []string{strings.Repeat("X", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:      testSymbolAAPL,
+			Quote:       &StockQuote{CurrentPrice: 150.00},
+			Metrics:     baseMetrics,
+			PriceTarget: &PriceTarget{TargetHigh: 250, TargetLow: 200, TargetMean: 225, CurrentPrice: 150},
+			NewsItems:   items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"price_target"`) {
+			t.Error("price_target should have been dropped (next after absent recommendation)")
+		}
+	})
+
+	t.Run("drops-earnings-when-rec-and-pt-absent", func(t *testing.T) {
+		t.Parallel()
+		// No recommendation or price-target. Earnings + metrics + news
+		// overflow. Earnings is next in cascade.
+		items := make([]newsHighlight, 0, 45)
+		for range 45 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("Y", 140),
+				URL:        "https://y.com",
+				Highlights: []string{strings.Repeat("Y", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:    testSymbolAAPL,
+			Quote:     &StockQuote{CurrentPrice: 150.00},
+			Metrics:   baseMetrics,
+			Earnings:  []EarningsEntry{{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35}},
+			NewsItems: items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-2")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"earnings_history"`) {
+			t.Error("earnings_history should have been dropped (next after absent rec/price-target)")
+		}
+	})
+
+	t.Run("drops-metrics-when-earnings-also-absent", func(t *testing.T) {
+		t.Parallel()
+		// No recommendation, price-target, or earnings. Metrics + news
+		// overflow. Metrics is next in cascade.
+		items := make([]newsHighlight, 0, 50)
+		for range 50 {
+			items = append(items, newsHighlight{
+				Title:      strings.Repeat("Z", 140),
+				URL:        "https://z.com",
+				Highlights: []string{strings.Repeat("Z", 190)},
+			})
+		}
+		input := &stockAnalysisInput{
+			Symbol:    testSymbolAAPL,
+			Quote:     &StockQuote{CurrentPrice: 150.00},
+			Metrics:   baseMetrics,
+			NewsItems: items,
+		}
+		prompt, err := buildAnalysisPrompt(input, "nonce-cascade-3")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(prompt, `"metrics"`) {
+			t.Error("metrics should have been dropped (last before news)")
+		}
+	})
+}
+
+func TestBuildAnalysisPrompt_TLDRFirst(t *testing.T) {
+	t.Parallel()
+	input := &stockAnalysisInput{
+		Symbol: testSymbolAAPL,
+		Quote:  &StockQuote{CurrentPrice: 150.00},
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-tldr")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "single-line TL;DR") {
+		t.Error("prompt should instruct TL;DR first line")
+	}
+	if !strings.Contains(prompt, "BEFORE any section header") {
+		t.Error("prompt should say TL;DR before sections")
+	}
+}
+
+func TestBuildAnalysisPrompt_NoDisclaimerInstruction(t *testing.T) {
+	t.Parallel()
+	input := &stockAnalysisInput{
+		Symbol: testSymbolAAPL,
+		Quote:  &StockQuote{CurrentPrice: 150.00},
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-nodisc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(prompt, "Include a brief disclaimer") {
+		t.Error("prompt should NOT instruct Gemini to include a disclaimer")
+	}
+	if !strings.Contains(prompt, "do not add one yourself") {
+		t.Error("prompt should tell Gemini to skip the disclaimer")
+	}
+}
+
+func TestBuildAnalysisPrompt_WithRecommendation(t *testing.T) {
+	t.Parallel()
+	rec := &RecommendationTrend{
+		Period: testRecommendPeriod, StrongBuy: 15, Buy: 20,
+		Hold: 5, Sell: 2, StrongSell: 1,
+	}
+
+	input := &stockAnalysisInput{
+		Symbol:         testSymbolAAPL,
+		Quote:          &StockQuote{CurrentPrice: 150.00},
+		Recommendation: rec,
+	}
+
+	prompt, err := buildAnalysisPrompt(input, "nonce-rec")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, `"analyst_recommendation"`) {
+		t.Error("prompt should contain analyst_recommendation")
+	}
+	if !strings.Contains(prompt, `"strong_buy": 15`) {
+		t.Error("prompt should contain strong_buy count")
+	}
+}
+
+func TestSanitizeMetrics_Passthrough(t *testing.T) {
+	t.Parallel()
+	m := &FinancialMetrics{
+		PEExclExtraTTM:         28.5,
+		EPSExclExtraTTM:        6.42,
+		RevenuePerShareTTM:     25.0,
+		NetProfitMarginTTM:     25.8,
+		ROETTM:                 145.0,
+		DebtToEquityTTM:        1.2,
+		Beta:                   1.3,
+		High52W:                260.0,
+		Low52W:                 164.0,
+		DividendYieldIndicated: 0.44,
+		RevenueGrowthTTM:       10.0,
+		EPSGrowthTTM:           15.0,
+	}
+
+	got := sanitizeMetrics(m)
+	if got == nil {
+		t.Fatal("expected non-nil sanitizedMetrics")
+	}
+	if got.PE != 28.5 {
+		t.Errorf("expected PE 28.5, got %f", got.PE)
+	}
+	if got.NetMargin != 25.8 {
+		t.Errorf("expected net margin 25.8 (as-is, no multiply), got %f", got.NetMargin)
+	}
+	if got.ROE != 145.0 {
+		t.Errorf("expected ROE 145.0 (as-is, no multiply), got %f", got.ROE)
+	}
+	if got.DivYield != 0.44 {
+		t.Errorf("expected div yield 0.44 (as-is, no multiply), got %f", got.DivYield)
+	}
+}
+
+func TestSanitizeMetrics_NilInput(t *testing.T) {
+	t.Parallel()
+	got := sanitizeMetrics(nil)
+	if got != nil {
+		t.Fatal("expected nil for nil input")
+	}
+}
+
+func TestPriceTargetToSanitized_ComputesUpside(t *testing.T) {
+	t.Parallel()
+	pt := &PriceTarget{
+		TargetHigh:   250,
+		TargetLow:    200,
+		TargetMean:   225,
+		TargetMedian: 228,
+		CurrentPrice: 187,
+	}
+
+	got := priceTargetToSanitized(pt, pt.CurrentPrice)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	// (225/187 - 1) * 100 = 20.320855...
+	expectedUpside := (225.0/187.0 - 1) * 100
+	diff := got.UpsidePct - expectedUpside
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 0.001 {
+		t.Errorf("expected upside ~%f, got %f (diff %f)", expectedUpside, got.UpsidePct, diff)
+	}
+	if got.TargetMean != 225 {
+		t.Errorf("expected target_mean 225, got %f", got.TargetMean)
+	}
+}
+
+func TestPriceTargetToSanitized_NilInput(t *testing.T) {
+	t.Parallel()
+	got := priceTargetToSanitized(nil, 0)
+	if got != nil {
+		t.Fatal("expected nil for nil input")
+	}
+}
+
+func TestPriceTargetToSanitized_ZeroPriceGuardsInf(t *testing.T) {
+	t.Parallel()
+	pt := &PriceTarget{
+		TargetHigh:   250,
+		TargetLow:    200,
+		TargetMean:   225,
+		TargetMedian: 228,
+		CurrentPrice: 0,
+	}
+
+	got := priceTargetToSanitized(pt, 0)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if got.UpsidePct != 0 {
+		t.Errorf("expected upside_pct 0 when current price is zero, got %f", got.UpsidePct)
+	}
+	// CurrentPrice in the output should be 0 when both pt.CurrentPrice
+	// and quoteCurrentPrice are zero.
+	if got.CurrentPrice != 0 {
+		t.Errorf("expected current_price 0, got %f", got.CurrentPrice)
+	}
+}
+
+func TestRecommendationToSanitized_NilInput(t *testing.T) {
+	t.Parallel()
+	got := recommendationToSanitized(nil)
+	if got != nil {
+		t.Fatal("expected nil for nil input")
+	}
+}
+
+func TestRecommendationToSanitized_Normal(t *testing.T) {
+	t.Parallel()
+	rec := &RecommendationTrend{
+		Period: testRecommendPeriod, StrongBuy: 15, Buy: 20,
+		Hold: 5, Sell: 2, StrongSell: 1,
+	}
+	got := recommendationToSanitized(rec)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if got.StrongBuy != 15 {
+		t.Errorf("expected strong_buy 15, got %d", got.StrongBuy)
+	}
+	if got.Period != testRecommendPeriod {
+		t.Errorf("expected period 2026-05, got %s", got.Period)
+	}
+}
+
+func TestEarningsToReactions_Normal(t *testing.T) {
+	t.Parallel()
+	entries := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
+	}
+
+	// barsByPeriod is ignored by the simplified function — NextDayChangePct
+	// is always zero in this path. The Databento-based computation lives
+	// exclusively in fetchEarningsReactions.
+	got := earningsToReactions(entries)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 reaction, got %d", len(got))
+	}
+	if got[0].Period != testEarningsPeriod1 {
+		t.Errorf("expected period %s, got %s", testEarningsPeriod1, got[0].Period)
+	}
+	if got[0].NextDayChangePct != 0 {
+		t.Errorf("expected next_day_change_pct 0, got %f", got[0].NextDayChangePct)
+	}
+}
+
+func TestEarningsToReactions_PartialBars(t *testing.T) {
+	t.Parallel()
+	entries := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
+		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
+	}
+
+	// NextDayChangePct is always zero in this simplified path.
+	got := earningsToReactions(entries)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 reactions, got %d", len(got))
+	}
+	if got[0].NextDayChangePct != 0 {
+		t.Errorf("expected next_day_change_pct 0, got %f", got[0].NextDayChangePct)
+	}
+	if got[1].NextDayChangePct != 0 {
+		t.Errorf("expected next_day_change_pct 0, got %f", got[1].NextDayChangePct)
+	}
+}
+
+func TestEarningsToReactions_CappedAt4(t *testing.T) {
+	t.Parallel()
+	entries := make([]EarningsEntry, 6)
+	for i := range entries {
+		entries[i] = EarningsEntry{
+			Period:      fmt.Sprintf("202%d-Q%d", i/4, i%4+1),
+			Actual:      float64(2 + i),
+			Estimate:    float64(2 + i - 1),
+			SurprisePct: 5.0,
+		}
+	}
+
+	got := earningsToReactions(entries)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 reactions (capped), got %d", len(got))
+	}
+}
+
+func TestSendOrEditAnalysisResult_HardcodedDisclaimer(t *testing.T) {
+	t.Parallel()
+	b, srv := newTestBot(t)
+
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+		},
+	}
+
+	// Use nil loadingMsg to trigger SendMessage path, which uses multipart
+	// form data that the mock server can capture text from.
+	sendOrEditAnalysisResult(context.Background(), b, update, nil, nil, "Analysis text")
+
+	// MarkdownV2 escaping may escape dots and hyphens in the disclaimer
+	// (e.g. "AI-generated" → "AI\-generated"), so check for substrings
+	// that do not contain escaped characters.
+	if !strings.Contains(srv.lastMessage, "generated content") {
+		t.Fatalf("output should contain the hardcoded disclaimer, got %q", srv.lastMessage)
+	}
+	if !strings.Contains(srv.lastMessage, "financial advice") {
+		t.Fatalf("output should contain financial advice disclaimer, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_PriceTargetFails(t *testing.T) {
+	mockQuote := StockQuote{CurrentPrice: 150.0}
+	mockMetrics := financialMetricsResponse{
+		Metric: FinancialMetrics{PEExclExtraTTM: 28.5},
+	}
+	mockEarnings := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, SurprisePct: 2.13},
+	}
+	mockRec := []RecommendationTrend{
+		{Period: testRecommendPeriod, StrongBuy: 15, Buy: 20, Hold: 5, Sell: 2, StrongSell: 1},
+	}
+	mockExaResp := exaSearchResponse{
+		RequestID: "req",
+		Results:   []exaSearchResult{{Title: "News"}},
+	}
+
+	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case finnhubQuotePath:
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case finnhubProfilePath:
+			_ = json.NewEncoder(w).Encode(CompanyProfile{Name: "Test Co"})
+		case finnhubMetricsPath:
+			_ = json.NewEncoder(w).Encode(mockMetrics)
+		case finnhubEarningsPath:
+			_ = json.NewEncoder(w).Encode(mockEarnings)
+		case finnhubRecommendPath:
+			_ = json.NewEncoder(w).Encode(mockRec)
+		case finnhubPriceTargetPath:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer dispatchServer.Close()
+	useRedirectedHTTPClient(t, dispatchServer.URL)
+
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+	t.Setenv("EXA_API_KEY", "test-key")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Analysis without price target"}}}},
+				},
+			},
+		},
+		timeout: 30 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Analysis without price target") {
+		t.Fatalf("expected analysis to continue despite price target failure, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_EarningsRxnsSkipNoDatabento(t *testing.T) {
+	mockQuote := StockQuote{CurrentPrice: 150.0}
+	mockMetrics := financialMetricsResponse{
+		Metric: FinancialMetrics{PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42},
+	}
+	mockEarnings := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, SurprisePct: 2.13},
+	}
+	mockExaResp := exaSearchResponse{
+		RequestID: "req",
+		Results:   []exaSearchResult{{Title: "News"}},
+	}
+
+	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case finnhubQuotePath:
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case finnhubProfilePath:
+			_ = json.NewEncoder(w).Encode(CompanyProfile{Name: "Test Co"})
+		case finnhubMetricsPath:
+			_ = json.NewEncoder(w).Encode(mockMetrics)
+		case finnhubEarningsPath:
+			_ = json.NewEncoder(w).Encode(mockEarnings)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer dispatchServer.Close()
+	useRedirectedHTTPClient(t, dispatchServer.URL)
+
+	t.Setenv("FINNHUB_API_KEY", "test-key")
+	t.Setenv("EXA_API_KEY", "test-key")
+	// Explicitly unset DATABENTO_API_KEY so fetchEarningsReactions is skipped.
+	t.Setenv("DATABENTO_API_KEY", "")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Analysis with earnings"}}}},
+				},
+			},
+		},
+		timeout: 30 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	if !strings.Contains(srv.lastMessage, "Analysis with earnings") {
+		t.Fatalf("expected analysis to proceed without Databento, got %q", srv.lastMessage)
+	}
+}
+
+func TestStockAnalysisHandler_SuccessWithFundamentals(t *testing.T) {
+	mockQuote := StockQuote{
+		CurrentPrice:  150.25,
+		Change:        2.50,
+		PercentChange: 1.69,
+		High:          151.00,
+		Low:           148.50,
+		Open:          149.00,
+		PreviousClose: 147.75,
+	}
+	mockProfile := CompanyProfile{
+		Name:                 testProfileName,
+		MarketCapitalization: 3000000,
+		Industry:             testIndustryTechnology,
+		Exchange:             "NASDAQ",
+	}
+	mockMetrics := financialMetricsResponse{
+		Metric: FinancialMetrics{
+			PEExclExtraTTM:     28.5,
+			EPSExclExtraTTM:    6.42,
+			NetProfitMarginTTM: 25.8,
+			ROETTM:             145.0,
+			DebtToEquityTTM:    1.2,
+			Beta:               1.3,
+			High52W:            260.0,
+			Low52W:             164.0,
+		},
+	}
+	mockEarnings := []EarningsEntry{
+		{Period: testEarningsPeriod1, Actual: 2.40, Estimate: 2.35, Surprise: 0.05, SurprisePct: 2.13},
+	}
+	mockRec := []RecommendationTrend{
+		{Period: testRecommendPeriod, StrongBuy: 15, Buy: 20, Hold: 5, Sell: 2, StrongSell: 1},
+	}
+	mockPriceTarget := PriceTarget{
+		TargetHigh:   250,
+		TargetLow:    200,
+		TargetMean:   225,
+		TargetMedian: 228,
+		CurrentPrice: 150.25,
+	}
+	mockExaResp := exaSearchResponse{
+		RequestID: "req-test-2",
+		Results: []exaSearchResult{
+			{
+				Title:         "Apple Q2 Results",
+				URL:           "https://example.com",
+				PublishedDate: "2026-05-01",
+				Highlights:    []string{"Apple reported record revenue."},
+			},
+		},
+	}
+	mockExaResp.CostDollars.Total = 0.005
+
+	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case finnhubQuotePath:
+			_ = json.NewEncoder(w).Encode(mockQuote)
+		case finnhubProfilePath:
+			_ = json.NewEncoder(w).Encode(mockProfile)
+		case finnhubMetricsPath:
+			_ = json.NewEncoder(w).Encode(mockMetrics)
+		case finnhubEarningsPath:
+			_ = json.NewEncoder(w).Encode(mockEarnings)
+		case finnhubRecommendPath:
+			_ = json.NewEncoder(w).Encode(mockRec)
+		case finnhubPriceTargetPath:
+			_ = json.NewEncoder(w).Encode(mockPriceTarget)
+		default:
+			_ = json.NewEncoder(w).Encode(mockExaResp)
+		}
+	}))
+	defer dispatchServer.Close()
+	useRedirectedHTTPClient(t, dispatchServer.URL)
+
+	t.Setenv("FINNHUB_API_KEY", "test-finnhub-key")
+	t.Setenv("EXA_API_KEY", "test-exa-key")
+	t.Setenv("DATABENTO_API_KEY", "")
+
+	resetExaCacheForTest(t)
+
+	prevInstance := stockAnalyzerInstance
+	stockAnalyzerInstance = &stockAnalyzer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{Content: &genai.Content{Parts: []*genai.Part{{Text: "**AAPL** comprehensive analysis with fundamentals"}}}},
+				},
+			},
+		},
+		timeout: 30 * time.Second,
+	}
+	defer func() { stockAnalyzerInstance = prevInstance }()
+
+	b, srv := newTestBot(t)
+	update := &models.Update{
+		Message: &models.Message{
+			ID:   1,
+			Chat: models.Chat{ID: -1001},
+			Text: testStockCommand,
+		},
+	}
+
+	stockAnalysisHandler(context.Background(), b, update)
+
+	lastMethod := srv.lastMethod()
+	if !strings.Contains(lastMethod, "editMessageText") {
+		t.Fatalf("expected editMessageText as last method, got %q", lastMethod)
+	}
+	if !strings.Contains(srv.lastMessage, "AAPL") {
+		t.Fatalf("expected analysis containing AAPL, got %q", srv.lastMessage)
+	}
+}
+
+func expectedFallbackMessage(prefix string) string {
+	return prefix + "\n\n" + plainTelegramMarkdownText(analysisDisclaimer)
+}
+
+func extractPayloadJSON(t *testing.T, prompt string) []byte {
+	t.Helper()
+	start := strings.Index(prompt, "{")
+	end := strings.LastIndex(prompt, "}")
+	if start == -1 || end == -1 || start >= end {
+		t.Fatal("JSON payload not found in prompt")
+	}
+	return []byte(prompt[start : end+1])
 }

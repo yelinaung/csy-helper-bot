@@ -412,15 +412,15 @@ func buildAnalysisPrompt(input *stockAnalysisInput, nonce string) (string, error
 		return "", fmt.Errorf("marshal analysis prompt payload: %w", err)
 	}
 
-	// Field-drop priority cascade: recommendation → price-target →
+	// Field-drop priority cascade: price-target → recommendation →
 	// earnings → metrics → news. Each stage is a top-level nil assignment
 	// followed by re-marshal and re-check.
 	for utf8.RuneCount(payloadJSON) > maxPromptTotalRuneLen {
 		//nolint:gocritic // Linear cascade by design — each stage is independently testable.
-		if payload.Recommendation != nil {
-			payload.Recommendation = nil
-		} else if payload.PriceTarget != nil {
+		if payload.PriceTarget != nil {
 			payload.PriceTarget = nil
+		} else if payload.Recommendation != nil {
+			payload.Recommendation = nil
 		} else if len(payload.Earnings) > 0 {
 			payload.Earnings = nil
 		} else if payload.Metrics != nil {

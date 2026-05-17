@@ -1929,10 +1929,11 @@ func TestBuildAnalysisPrompt_WithPriceTarget(t *testing.T) {
 	}
 }
 
-func TestBuildAnalysisPrompt_PromptBudgetDropsRecommendation(t *testing.T) {
+func TestBuildAnalysisPrompt_PromptBudgetDropsPriceTarget(t *testing.T) {
+	t.Parallel()
 	// Create a large prompt payload that exceeds the budget so
-	// recommendation is the first field dropped (cascade order:
-	// recommendation → price-target → earnings → metrics → news).
+	// price-target is the first field dropped (cascade order:
+	// price-target → recommendation → earnings → metrics → news).
 	mockMetrics := &FinancialMetrics{
 		PEExclExtraTTM: 28.5, EPSExclExtraTTM: 6.42,
 		RevenuePerShareTTM: 25.0, NetProfitMarginTTM: 25.8,
@@ -1972,9 +1973,9 @@ func TestBuildAnalysisPrompt_PromptBudgetDropsRecommendation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Recommendation should have been dropped first by the cascade.
-	if strings.Contains(prompt, `"analyst_recommendation"`) {
-		t.Error("prompt should NOT contain analyst_recommendation after budget drop")
+	// Price-target should have been dropped first by the cascade.
+	if strings.Contains(prompt, `"price_target"`) {
+		t.Error("prompt should NOT contain price_target after budget drop")
 	}
 }
 

@@ -40,11 +40,12 @@ The prompt asks for a flat response covering metrics, news, sentiment, and risks
 ```text
 !sa AAPL ──▶ Finnhub quote ──▶ Finnhub profile ──▶ Exa search
                   │                    │                  │
-                  │                    │        ┌─────────┴──────────┐
-                  │                    │        │ Finnhub metrics    │ (fault-tolerant)
-                  │                    │        │ Finnhub earnings   │ (fault-tolerant)
-                  │                    │        │ Finnhub recommend  │ (fault-tolerant)
-                  │                    │        └─────────┬──────────┘
+                   │                    │        ┌─────────┴──────────┐
+                   │                    │        │ Finnhub metrics    │ (fault-tolerant)
+                   │                    │        │ Finnhub earnings   │ (fault-tolerant)
+                   │                    │        │ Finnhub recommend  │ (fault-tolerant)
+                   │                    │        │ Finnhub price-target│ (fault-tolerant)
+                   │                    │        └─────────┬──────────┘
                   │                    │                  │
                   ▼                    ▼                  ▼
               ┌─────────────────────────────────────────────┐
@@ -68,8 +69,9 @@ The prompt asks for a flat response covering metrics, news, sentiment, and risks
 | `GET /api/v1/stock/metric?symbol=X&metric=all` | P/E ratio, EPS, revenue/share, net margin, ROE, ROA, D/E ratio, beta, 52w high/low, dividend yield, revenue/EPS growth | log warn, nil, continue |
 | `GET /api/v1/stock/earnings?symbol=X&limit=4` | Last 4 quarterly earnings: period, estimate, actual, surprise, surprise% | log warn, nil, continue |
 | `GET /api/v1/stock/recommendation?symbol=X` | Latest analyst consensus: strongBuy, buy, hold, sell, strongSell counts + period | log warn, nil, continue |
+| `GET /api/v1/stock/price-target?symbol=X` | Price targets: high, low, mean, median target prices vs current price | log warn, nil, continue |
 
-All three are fault-tolerant. A stock without earnings data (e.g., an ETF, a newly listed company) still gets analysis from available data. The prompt instructs Gemini to skip sections gracefully when data is missing or zero-valued.
+All four are fault-tolerant. A stock without earnings data (e.g., an ETF, a newly listed company) still gets analysis from available data. The prompt instructs Gemini to skip sections gracefully when data is missing or zero-valued.
 
 ### Data Flow (Updated)
 

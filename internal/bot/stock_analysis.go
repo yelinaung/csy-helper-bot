@@ -543,7 +543,7 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	defer cancel()
 
 	temp := float32(0.3)
-	maxTokens := int32(2000)
+	maxTokens := int32(10000)
 	config := &genai.GenerateContentConfig{
 		Temperature:     &temp,
 		MaxOutputTokens: maxTokens,

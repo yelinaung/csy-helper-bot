@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultGeminiModelName = "gemini-2.5-flash"
+	defaultGeminiModelName = "gemini-3.5-flash"
 	defaultExplainTimeout  = 60 * time.Second
 
 	// Input and response limits are measured in runes so multi-byte Telegram

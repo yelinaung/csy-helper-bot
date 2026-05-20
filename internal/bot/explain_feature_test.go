@@ -249,14 +249,14 @@ func TestExplainUsesDefaultModelWhenUnset(t *testing.T) {
 
 func TestExplainUsesConfiguredModel(t *testing.T) {
 	gen := &capturingGenerator{}
-	explainer := &geminiExplainer{generator: gen, model: "gemini-3-flash-preview"}
+	explainer := &geminiExplainer{generator: gen, model: defaultGeminiModelName}
 
 	_, err := explainer.explainWithLanguage(context.Background(), "test input", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gen.capturedModel != "gemini-3-flash-preview" {
-		t.Fatalf("expected configured model %q, got %q", "gemini-3-flash-preview", gen.capturedModel)
+	if gen.capturedModel != defaultGeminiModelName {
+		t.Fatalf("expected configured model %q, got %q", defaultGeminiModelName, gen.capturedModel)
 	}
 }
 

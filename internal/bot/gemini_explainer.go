@@ -328,21 +328,42 @@ func isGeminiResponseBlocked(resp *genai.GenerateContentResponse) (bool, string)
 	return false, ""
 }
 
-//nolint:exhaustive // Fail-closed: any non-empty/non-unspecified reason is treated as blocked.
 func isBlockedReason(reason genai.BlockedReason) bool {
 	switch reason {
 	case "", genai.BlockedReasonUnspecified:
 		return false
+	case genai.BlockedReasonSafety,
+		genai.BlockedReasonOther,
+		genai.BlockedReasonBlocklist,
+		genai.BlockedReasonProhibitedContent,
+		genai.BlockedReasonImageSafety,
+		genai.BlockedReasonModelArmor,
+		genai.BlockedReasonJailbreak:
+		return true
 	default:
 		return true
 	}
 }
 
-//nolint:exhaustive // Fail-closed: only explicit safe finish reasons are allowed.
 func isBlockedFinishReason(reason genai.FinishReason) bool {
 	switch reason {
 	case "", genai.FinishReasonUnspecified, genai.FinishReasonStop, genai.FinishReasonMaxTokens:
 		return false
+	case genai.FinishReasonSafety,
+		genai.FinishReasonRecitation,
+		genai.FinishReasonLanguage,
+		genai.FinishReasonOther,
+		genai.FinishReasonBlocklist,
+		genai.FinishReasonProhibitedContent,
+		genai.FinishReasonSPII,
+		genai.FinishReasonMalformedFunctionCall,
+		genai.FinishReasonImageSafety,
+		genai.FinishReasonUnexpectedToolCall,
+		genai.FinishReasonImageProhibitedContent,
+		genai.FinishReasonNoImage,
+		genai.FinishReasonImageRecitation,
+		genai.FinishReasonImageOther:
+		return true
 	default:
 		return true
 	}

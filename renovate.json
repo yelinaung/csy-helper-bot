@@ -4,7 +4,7 @@
   "extends": [
     "config:best-practices"
   ],
-  "minimumReleaseAge": "7 days",
+  "minimumReleaseAge": "14 days",
   "pre-commit": {
     "enabled": true
   },

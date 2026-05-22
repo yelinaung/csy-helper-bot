@@ -417,13 +417,19 @@ func initStockAnalyzer() {
 		return
 	}
 
-	analyzer, err := newStockAnalyzer(context.Background(), geminiKey, model, timeout)
+	maxOutputTokens, err := loadAnalysisMaxOutputTokens()
+	if err != nil {
+		log.Error().Err(err).Msg("Stock analysis disabled: invalid STOCK_ANALYSIS_MAX_OUTPUT_TOKENS")
+		return
+	}
+
+	analyzer, err := newStockAnalyzer(context.Background(), geminiKey, model, timeout, maxOutputTokens)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize stock analyzer")
 		return
 	}
 	stockAnalyzerInstance = analyzer
-	log.Info().Str("model", model).Dur("timeout", timeout).Msg("Stock analyzer initialized")
+	log.Info().Str("model", model).Dur("timeout", timeout).Int32("max_output_tokens", maxOutputTokens).Msg("Stock analyzer initialized")
 }
 
 const (

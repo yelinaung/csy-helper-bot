@@ -19,19 +19,20 @@ import (
 )
 
 const (
-	analysisInvalidUsageMsg       = "invalid usage, use !sa SYMBOL (e.g., !sa AAPL)"
-	analysisNotConfiguredMsg      = "Stock analysis is not configured. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY, GEMINI_API_KEY, and FINNHUB_API_KEY."
-	analysisBlockedMsg            = "%s analysis is not available."
-	analysisFinnhubErrorMsg       = "Failed to fetch stock data for %s. Please try again later."
-	analysisExaErrorMsg           = "Failed to fetch news for %s. Please try again later."
-	analysisTimeoutMsg            = "Analysis timed out for %s. Please try again."
-	analysisUnavailableMsg        = "Analysis unavailable for %s."
-	analysisFailedMsg             = "Failed to analyze %s. Please try again later."
-	analysisRateLimitMsg          = "Rate limit reached for stock analysis. Try again in %s."
-	analysisNoNewsNote            = "No recent web news found for this search."
-	maxAnalysisResponseRuneLength = 3500
-	defaultAnalysisTimeoutSec     = 90
-	maxPromptTotalRuneLen         = 6000
+	analysisInvalidUsageMsg        = "invalid usage, use !sa SYMBOL (e.g., !sa AAPL)"
+	analysisNotConfiguredMsg       = "Stock analysis is not configured. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY, GEMINI_API_KEY, and FINNHUB_API_KEY."
+	analysisBlockedMsg             = "%s analysis is not available."
+	analysisFinnhubErrorMsg        = "Failed to fetch stock data for %s. Please try again later."
+	analysisExaErrorMsg            = "Failed to fetch news for %s. Please try again later."
+	analysisTimeoutMsg             = "Analysis timed out for %s. Please try again."
+	analysisUnavailableMsg         = "Analysis unavailable for %s."
+	analysisFailedMsg              = "Failed to analyze %s. Please try again later."
+	analysisRateLimitMsg           = "Rate limit reached for stock analysis. Try again in %s."
+	analysisNoNewsNote             = "No recent web news found for this search."
+	maxAnalysisResponseRuneLength  = 3500
+	defaultAnalysisTimeoutSec      = 90
+	defaultAnalysisMaxOutputTokens = 10000
+	maxPromptTotalRuneLen          = 6000
 
 	maxProfileNameRuneLen = 100
 	maxIndustryRuneLen    = 80
@@ -60,9 +61,10 @@ type stockAnalysisInput struct {
 }
 
 type stockAnalyzer struct {
-	generator geminiContentGenerator
-	model     string
-	timeout   time.Duration
+	generator       geminiContentGenerator
+	model           string
+	timeout         time.Duration
+	maxOutputTokens int32
 }
 
 type sanitizedQuote struct {
@@ -185,7 +187,7 @@ func isKnownRangeToken(token string) bool {
 	return ok
 }
 
-func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration) (*stockAnalyzer, error) {
+func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Duration, maxOutputTokens int32) (*stockAnalyzer, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("gemini API key is required")
 	}
@@ -193,6 +195,10 @@ func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Du
 	model = cmp.Or(strings.TrimSpace(model), defaultGeminiModelName)
 
 	timeout = cmp.Or(timeout, time.Duration(defaultAnalysisTimeoutSec)*time.Second)
+
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = defaultAnalysisMaxOutputTokens
+	}
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
@@ -203,9 +209,10 @@ func newStockAnalyzer(ctx context.Context, apiKey, model string, timeout time.Du
 	}
 
 	return &stockAnalyzer{
-		generator: client.Models,
-		model:     model,
-		timeout:   timeout,
+		generator:       client.Models,
+		model:           model,
+		timeout:         timeout,
+		maxOutputTokens: maxOutputTokens,
 	}, nil
 }
 
@@ -222,6 +229,21 @@ func loadAnalysisTimeout() (time.Duration, error) {
 		return 0, fmt.Errorf("invalid STOCK_ANALYSIS_TIMEOUT_SECONDS %q: must be greater than 0", raw)
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func loadAnalysisMaxOutputTokens() (int32, error) {
+	raw := strings.TrimSpace(os.Getenv("STOCK_ANALYSIS_MAX_OUTPUT_TOKENS"))
+	if raw == "" {
+		return defaultAnalysisMaxOutputTokens, nil
+	}
+	tokens, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid STOCK_ANALYSIS_MAX_OUTPUT_TOKENS %q: %w", raw, err)
+	}
+	if tokens <= 0 {
+		return 0, fmt.Errorf("invalid STOCK_ANALYSIS_MAX_OUTPUT_TOKENS %q: must be greater than 0", raw)
+	}
+	return int32(tokens), nil
 }
 
 // exaResultsToHighlights converts sanitized Exa results to the
@@ -543,10 +565,9 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	defer cancel()
 
 	temp := float32(0.3)
-	maxTokens := int32(10000)
 	config := &genai.GenerateContentConfig{
 		Temperature:     &temp,
-		MaxOutputTokens: maxTokens,
+		MaxOutputTokens: a.maxOutputTokens,
 		SafetySettings:  defaultGeminiSafetySettings(),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: analysisSystemInstruction}},

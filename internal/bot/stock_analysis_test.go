@@ -272,9 +272,10 @@ func TestAnalyze_Success(t *testing.T) {
 		},
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "test-model",
-		timeout:   30 * time.Second,
+		generator:       mock,
+		model:           "test-model",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -296,9 +297,10 @@ func TestAnalyze_Timeout(t *testing.T) {
 		err: context.DeadlineExceeded,
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "test-model",
-		timeout:   100 * time.Millisecond,
+		generator:       mock,
+		model:           "test-model",
+		timeout:         100 * time.Millisecond,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -324,9 +326,10 @@ func TestAnalyze_Blocked(t *testing.T) {
 		},
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "test-model",
-		timeout:   30 * time.Second,
+		generator:       mock,
+		model:           "test-model",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -352,9 +355,10 @@ func TestAnalyze_EmptyResponse(t *testing.T) {
 		},
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "test-model",
-		timeout:   30 * time.Second,
+		generator:       mock,
+		model:           "test-model",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -378,9 +382,10 @@ func TestAnalyze_TruncatesLongResponse(t *testing.T) {
 		},
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "test-model",
-		timeout:   30 * time.Second,
+		generator:       mock,
+		model:           "test-model",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -398,14 +403,14 @@ func TestAnalyze_TruncatesLongResponse(t *testing.T) {
 }
 
 func TestNewStockAnalyzer_MissingAPIKey(t *testing.T) {
-	_, err := newStockAnalyzer(context.Background(), "", "test-model", 30*time.Second)
+	_, err := newStockAnalyzer(context.Background(), "", "test-model", 30*time.Second, 10000)
 	if err == nil {
 		t.Fatal("expected error for empty API key")
 	}
 }
 
 func TestNewStockAnalyzer_WhitespaceAPIKey(t *testing.T) {
-	_, err := newStockAnalyzer(context.Background(), "   ", "test-model", 30*time.Second)
+	_, err := newStockAnalyzer(context.Background(), "   ", "test-model", 30*time.Second, 10000)
 	if err == nil {
 		t.Fatal("expected error for whitespace API key")
 	}
@@ -445,6 +450,44 @@ func TestLoadAnalysisTimeout_Invalid(t *testing.T) {
 func TestLoadAnalysisTimeout_Negative(t *testing.T) {
 	t.Setenv("STOCK_ANALYSIS_TIMEOUT_SECONDS", "-5")
 	_, err := loadAnalysisTimeout()
+	if err == nil {
+		t.Fatal("expected error for negative input")
+	}
+}
+
+func TestLoadAnalysisMaxOutputTokens_Default(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_MAX_OUTPUT_TOKENS", "")
+	got, err := loadAnalysisMaxOutputTokens()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != defaultAnalysisMaxOutputTokens {
+		t.Fatalf("got %d, want %d", got, defaultAnalysisMaxOutputTokens)
+	}
+}
+
+func TestLoadAnalysisMaxOutputTokens_Custom(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_MAX_OUTPUT_TOKENS", "20000")
+	got, err := loadAnalysisMaxOutputTokens()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 20000 {
+		t.Fatalf("got %d, want 20000", got)
+	}
+}
+
+func TestLoadAnalysisMaxOutputTokens_Invalid(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_MAX_OUTPUT_TOKENS", "notanumber")
+	_, err := loadAnalysisMaxOutputTokens()
+	if err == nil {
+		t.Fatal("expected error for invalid input")
+	}
+}
+
+func TestLoadAnalysisMaxOutputTokens_Negative(t *testing.T) {
+	t.Setenv("STOCK_ANALYSIS_MAX_OUTPUT_TOKENS", "-5")
+	_, err := loadAnalysisMaxOutputTokens()
 	if err == nil {
 		t.Fatal("expected error for negative input")
 	}
@@ -904,7 +947,8 @@ func TestStockAnalysisHandler_Blocked(t *testing.T) {
 		generator: &mockContentGenerator{
 			resp: &genai.GenerateContentResponse{},
 		},
-		timeout: 1 * time.Second,
+		timeout:         1 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -935,7 +979,8 @@ func TestStockAnalysisHandler_RateLimited(t *testing.T) {
 		generator: &mockContentGenerator{
 			resp: &genai.GenerateContentResponse{},
 		},
-		timeout: 1 * time.Second,
+		timeout:         1 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1109,7 +1154,8 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 				},
 			},
 		},
-		timeout: 30 * time.Second,
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1153,8 +1199,9 @@ func TestStockAnalysisHandler_FinnhubFailure(t *testing.T) {
 
 	prevInstance := stockAnalyzerInstance
 	stockAnalyzerInstance = &stockAnalyzer{
-		generator: &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
-		timeout:   1 * time.Second,
+		generator:       &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
+		timeout:         1 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1198,8 +1245,9 @@ func TestStockAnalysisHandler_ExaFailure(t *testing.T) {
 
 	prevInstance := stockAnalyzerInstance
 	stockAnalyzerInstance = &stockAnalyzer{
-		generator: &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
-		timeout:   1 * time.Second,
+		generator:       &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
+		timeout:         1 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1244,8 +1292,9 @@ func TestStockAnalysisHandler_GeminiTimeout(t *testing.T) {
 
 	prevInstance := stockAnalyzerInstance
 	stockAnalyzerInstance = &stockAnalyzer{
-		generator: &mockContentGenerator{err: context.DeadlineExceeded},
-		timeout:   100 * time.Millisecond,
+		generator:       &mockContentGenerator{err: context.DeadlineExceeded},
+		timeout:         100 * time.Millisecond,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1297,7 +1346,8 @@ func TestStockAnalysisHandler_GeminiBlocked(t *testing.T) {
 				},
 			},
 		},
-		timeout: 30 * time.Second,
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -1459,9 +1509,10 @@ func TestInitStockAnalyzer_DisabledInvalidTimeout(t *testing.T) {
 func TestAnalyze_GeneratesDifferentNoncesPerCall(t *testing.T) {
 	gen := &capturingGenerator{}
 	analyzer := &stockAnalyzer{
-		generator: gen,
-		model:     "test-model",
-		timeout:   30 * time.Second,
+		generator:       gen,
+		model:           "test-model",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 
 	input := &stockAnalysisInput{
@@ -1534,7 +1585,7 @@ func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
 
 func TestNewStockAnalyzer_ModelDefaultPath(t *testing.T) {
 	// genai.NewClient succeeds with any non-empty API key (no API call).
-	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "", 30*time.Second)
+	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "", 30*time.Second, 10000)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1547,7 +1598,7 @@ func TestNewStockAnalyzer_ModelDefaultPath(t *testing.T) {
 }
 
 func TestNewStockAnalyzer_TimeoutDefaultPath(t *testing.T) {
-	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "custom-model", 0)
+	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "custom-model", 0, 10000)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1556,6 +1607,16 @@ func TestNewStockAnalyzer_TimeoutDefaultPath(t *testing.T) {
 	}
 	if analyzer.timeout != time.Duration(defaultAnalysisTimeoutSec)*time.Second {
 		t.Fatalf("expected default timeout, got %v", analyzer.timeout)
+	}
+}
+
+func TestNewStockAnalyzer_MaxOutputTokensDefaultPath(t *testing.T) {
+	analyzer, err := newStockAnalyzer(context.Background(), "fake-key", "custom-model", 30*time.Second, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if analyzer.maxOutputTokens != defaultAnalysisMaxOutputTokens {
+		t.Fatalf("expected default max output tokens %d, got %d", defaultAnalysisMaxOutputTokens, analyzer.maxOutputTokens)
 	}
 }
 
@@ -1594,9 +1655,10 @@ func TestAnalyze_GeneratorError(t *testing.T) {
 		err: errors.New("gemini transport error"),
 	}
 	analyzer := &stockAnalyzer{
-		generator: mock,
-		model:     "",
-		timeout:   30 * time.Second,
+		generator:       mock,
+		model:           "",
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	input := &stockAnalysisInput{
 		Symbol: "AAPL",
@@ -2411,7 +2473,8 @@ func TestStockAnalysisHandler_PriceTargetFails(t *testing.T) {
 				},
 			},
 		},
-		timeout: 30 * time.Second,
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -2478,7 +2541,8 @@ func TestStockAnalysisHandler_EarningsRxnsSkipNoDatabento(t *testing.T) {
 				},
 			},
 		},
-		timeout: 30 * time.Second,
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 
@@ -2589,7 +2653,8 @@ func TestStockAnalysisHandler_SuccessWithFundamentals(t *testing.T) {
 				},
 			},
 		},
-		timeout: 30 * time.Second,
+		timeout:         30 * time.Second,
+		maxOutputTokens: 10000,
 	}
 	defer func() { stockAnalyzerInstance = prevInstance }()
 

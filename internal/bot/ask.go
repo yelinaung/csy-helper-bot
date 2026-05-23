@@ -135,19 +135,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to answer ask question")
-
-		errText := "Failed to answer your question. Please try again later."
-		if errors.Is(err, ErrExplainTimeout) {
-			errText = "Answer timed out. Please try again."
-		}
-		if errors.Is(err, ErrExplainBlocked) {
-			errText = "I can't answer that request."
-		}
-		if errors.Is(err, ErrImageTooLarge) {
-			errText = "The image is too large to analyze."
-		}
-
-		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(err))
 		return
 	}
 
@@ -239,6 +227,19 @@ func sendOrEditExplainResult(
 			AllowSendingWithoutReply: true,
 		},
 	})
+}
+
+func explainErrorToUserText(err error) string {
+	switch {
+	case errors.Is(err, ErrExplainTimeout):
+		return "Answer timed out. Please try again."
+	case errors.Is(err, ErrExplainBlocked):
+		return "I can't answer that request."
+	case errors.Is(err, ErrImageTooLarge):
+		return "The image is too large to analyze."
+	default:
+		return "Failed to answer your question. Please try again later."
+	}
 }
 
 func extractQuotedText(message *models.Message) string {
@@ -500,8 +501,11 @@ func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) ([]by
 		return nil, "", fmt.Errorf("read photo body: %w", err)
 	}
 
-	mimeType := mime.TypeByExtension(path.Ext(file.FilePath))
-	if mimeType == "" {
+	mimeType := http.DetectContentType(imageBytes)
+	if !strings.HasPrefix(mimeType, "image/") {
+		mimeType = mime.TypeByExtension(path.Ext(file.FilePath))
+	}
+	if mimeType == "" || !strings.HasPrefix(mimeType, "image/") {
 		mimeType = "image/jpeg"
 	}
 
@@ -604,19 +608,7 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	if explainErr != nil {
 		log.Error().Err(explainErr).Msg("Failed to answer photo ask question")
-
-		errText := "Failed to answer your question. Please try again later."
-		if errors.Is(explainErr, ErrExplainTimeout) {
-			errText = "Answer timed out. Please try again."
-		}
-		if errors.Is(explainErr, ErrExplainBlocked) {
-			errText = "I can't answer that request."
-		}
-		if errors.Is(explainErr, ErrImageTooLarge) {
-			errText = "The image is too large to analyze."
-		}
-
-		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(explainErr))
 		return
 	}
 
@@ -651,7 +643,7 @@ func extractPhotoAskQuestion(message *models.Message) string {
 		}
 	}
 
-	mention, suffix, ok := extractMentionAndSuffixFromCaption(caption)
+	mention, suffix, ok := mentionAndSuffixFromText(caption, botMention)
 	if !ok || !strings.EqualFold(mention, botMention) {
 		return ""
 	}
@@ -669,31 +661,6 @@ func extractPhotoAskQuestion(message *models.Message) string {
 	}
 
 	return after
-}
-
-func extractMentionAndSuffixFromCaption(caption string) (mention string, suffix string, ok bool) {
-	if strings.TrimSpace(caption) == "" || botMention == "" {
-		return "", "", false
-	}
-
-	lowerCaption := strings.ToLower(caption)
-	lowerMention := strings.ToLower(botMention)
-	searchFrom := 0
-
-	for searchFrom < len(lowerCaption) {
-		idx := strings.Index(lowerCaption[searchFrom:], lowerMention)
-		if idx == -1 {
-			return "", "", false
-		}
-		start := searchFrom + idx
-		end := start + len(lowerMention)
-		if hasMentionBoundaries(caption, start, end) {
-			return caption[start:end], caption[end:], true
-		}
-		searchFrom = end
-	}
-
-	return "", "", false
 }
 
 func containsMention(text, targetMention string) bool {

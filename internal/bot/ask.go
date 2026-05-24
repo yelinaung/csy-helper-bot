@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -57,7 +61,8 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	question := extractAskQuestion(update.Message)
 	quoted := extractQuotedText(update.Message)
-	if question == "" && quoted == "" {
+	repliedPhoto := extractRepliedPhoto(update.Message)
+	if question == "" && quoted == "" && repliedPhoto == nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -109,19 +114,28 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quoted)
-	explanation, err := textExplainer.explainWithLanguage(ctx, quoted, question, respondInBurmese)
+
+	var explanation string
+	var err error
+	if repliedPhoto != nil {
+		imageBytes, mimeType, downloadErr := downloadTelegramPhoto(ctx, b, repliedPhoto.FileID)
+		if downloadErr != nil {
+			log.Error().Err(downloadErr).Msg("Failed to download replied photo")
+			sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
+				"Failed to download the replied image. Please try again.")
+			return
+		}
+		if quoted != "" {
+			explanation, err = textExplainer.explainWithTextAndImage(ctx, quoted, imageBytes, mimeType, question, respondInBurmese)
+		} else {
+			explanation, err = textExplainer.explainWithImage(ctx, imageBytes, mimeType, question, respondInBurmese)
+		}
+	} else {
+		explanation, err = textExplainer.explainWithLanguage(ctx, quoted, question, respondInBurmese)
+	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to answer ask question")
-
-		errText := "Failed to answer your question. Please try again later."
-		if errors.Is(err, ErrExplainTimeout) {
-			errText = "Answer timed out. Please try again."
-		}
-		if errors.Is(err, ErrExplainBlocked) {
-			errText = "I can't answer that request."
-		}
-
-		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, errText)
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(err))
 		return
 	}
 
@@ -215,6 +229,19 @@ func sendOrEditExplainResult(
 	})
 }
 
+func explainErrorToUserText(err error) string {
+	switch {
+	case errors.Is(err, ErrExplainTimeout):
+		return "Answer timed out. Please try again."
+	case errors.Is(err, ErrExplainBlocked):
+		return "I can't answer that request."
+	case errors.Is(err, ErrImageTooLarge):
+		return "The image is too large to analyze."
+	default:
+		return "Failed to answer your question. Please try again later."
+	}
+}
+
 func extractQuotedText(message *models.Message) string {
 	if message == nil {
 		return ""
@@ -284,7 +311,7 @@ func shouldHandleAskMention(update *models.Update) bool {
 
 	// Bare @bot mention is also valid when it replies to / quotes a message —
 	// the quoted text becomes the thing to explain.
-	return extractQuotedText(update.Message) != ""
+	return extractQuotedText(update.Message) != "" || extractRepliedPhoto(update.Message) != nil
 }
 
 func extractAskQuestion(message *models.Message) string {
@@ -297,6 +324,10 @@ func extractAskQuestion(message *models.Message) string {
 		return ""
 	}
 
+	return stripAskPrefix(suffix)
+}
+
+func stripAskPrefix(suffix string) string {
 	after := strings.TrimSpace(suffix)
 	if after == "" {
 		return ""
@@ -308,7 +339,6 @@ func extractAskQuestion(message *models.Message) string {
 	if strings.HasPrefix(afterLower, "ask ") {
 		return strings.TrimSpace(after[len("ask "):])
 	}
-
 	return after
 }
 
@@ -426,4 +456,200 @@ func utf16UnitsForRune(r rune) int {
 		return 2
 	}
 	return 1
+}
+
+// extractPhoto returns the highest-resolution variant from a message's photo
+// array. Telegram sends multiple sizes; the last element is the largest.
+func extractPhoto(message *models.Message) *models.PhotoSize {
+	if message == nil || len(message.Photo) == 0 {
+		return nil
+	}
+	return &message.Photo[len(message.Photo)-1]
+}
+
+func extractRepliedPhoto(message *models.Message) *models.PhotoSize {
+	if message == nil || message.ReplyToMessage == nil {
+		return nil
+	}
+	return extractPhoto(message.ReplyToMessage)
+}
+
+func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) ([]byte, string, error) {
+	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return nil, "", fmt.Errorf("get file %s: %w", fileID, err)
+	}
+	if file.FilePath == "" {
+		return nil, "", errors.New("empty file path from Telegram")
+	}
+
+	downloadURL := b.FileDownloadLink(file)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create download request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("download photo: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("download photo: got status %d", resp.StatusCode)
+	}
+
+	imageBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("read photo body: %w", err)
+	}
+
+	mimeType := http.DetectContentType(imageBytes)
+	if !strings.HasPrefix(mimeType, "image/") {
+		mimeType = mime.TypeByExtension(path.Ext(file.FilePath))
+	}
+	if mimeType == "" || !strings.HasPrefix(mimeType, "image/") {
+		mimeType = "image/jpeg"
+	}
+
+	return imageBytes, mimeType, nil
+}
+
+func shouldHandlePhotoAsk(update *models.Update) bool {
+	if update == nil || update.Message == nil {
+		return false
+	}
+	if botMention == "" {
+		return false
+	}
+	if len(update.Message.Photo) == 0 {
+		return false
+	}
+
+	return containsMention(update.Message.Caption, botMention)
+}
+
+func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if textExplainer == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Ask feature is not configured. Please set GEMINI_API_KEY.",
+		})
+		return
+	}
+
+	allowed, retryAfter := allowExplainRequest(update.Message)
+	if !allowed {
+		var userID int64
+		if update.Message.From != nil {
+			userID = update.Message.From.ID
+		}
+		log.Warn().
+			Int64("chat_id", update.Message.Chat.ID).
+			Int64("user_id", userID).
+			Dur("retry_after", retryAfter).
+			Msg("Photo ask request rate limited")
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "Rate limit reached for ask requests. Please try again shortly.",
+			ReplyParameters: &models.ReplyParameters{
+				MessageID:                update.Message.ID,
+				AllowSendingWithoutReply: true,
+			},
+		})
+		return
+	}
+
+	thinkingMsg, thinkingErr := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            "thinking...",
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                update.Message.ID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if thinkingErr != nil {
+		log.Warn().
+			Err(thinkingErr).
+			Int64("chat_id", update.Message.Chat.ID).
+			Msg("Failed to send thinking message for photo ask request")
+	}
+
+	photo := extractPhoto(update.Message)
+	if photo == nil {
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
+			"Failed to process the image. Please try again.")
+		return
+	}
+
+	imageBytes, mimeType, downloadErr := downloadTelegramPhoto(ctx, b, photo.FileID)
+	if downloadErr != nil {
+		log.Error().Err(downloadErr).Msg("Failed to download photo")
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
+			"Failed to download the image. Please try again.")
+		return
+	}
+
+	question := extractPhotoAskQuestion(update.Message)
+	quoted := extractQuotedText(update.Message)
+	respondInBurmese := shouldRespondInBurmese(update.Message.Caption,
+		update.Message.Text, quoted)
+
+	var explanation string
+	var explainErr error
+
+	if quoted != "" {
+		explanation, explainErr = textExplainer.explainWithTextAndImage(ctx, quoted,
+			imageBytes, mimeType, question, respondInBurmese)
+	} else {
+		explanation, explainErr = textExplainer.explainWithImage(ctx, imageBytes,
+			mimeType, question, respondInBurmese)
+	}
+
+	if explainErr != nil {
+		log.Error().Err(explainErr).Msg("Failed to answer photo ask question")
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(explainErr))
+		return
+	}
+
+	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+func extractPhotoAskQuestion(message *models.Message) string {
+	if message == nil || botMention == "" {
+		return ""
+	}
+
+	caption := message.Caption
+	if strings.TrimSpace(caption) == "" {
+		return ""
+	}
+
+	for _, entity := range message.CaptionEntities {
+		if entity.Type != models.MessageEntityTypeMention {
+			continue
+		}
+		mention, suffix, ok := mentionAndSuffixAtEntity(caption, &entity)
+		if ok && strings.EqualFold(mention, botMention) {
+			return stripAskPrefix(suffix)
+		}
+	}
+
+	mention, suffix, ok := mentionAndSuffixFromText(caption, botMention)
+	if !ok || !strings.EqualFold(mention, botMention) {
+		return ""
+	}
+
+	return stripAskPrefix(suffix)
+}
+
+func containsMention(text, targetMention string) bool {
+	if strings.TrimSpace(text) == "" || targetMention == "" {
+		return false
+	}
+	_, _, ok := mentionAndSuffixFromText(text, targetMention)
+	return ok
 }

@@ -82,6 +82,7 @@ func Run() error {
 	}
 	botUserID = me.ID
 	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, requestLoggingMiddleware)
+	b.RegisterHandlerMatchFunc(shouldHandlePhotoAsk, photoAskHandler, requestLoggingMiddleware)
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
 	if err != nil {

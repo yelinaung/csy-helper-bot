@@ -237,6 +237,8 @@ func explainErrorToUserText(err error) string {
 		return "I can't answer that request."
 	case errors.Is(err, ErrImageTooLarge):
 		return "The image is too large to analyze."
+	case errors.Is(err, ErrInvalidImageType):
+		return "The image type is not supported."
 	default:
 		return "Failed to answer your question. Please try again later."
 	}

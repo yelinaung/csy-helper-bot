@@ -324,6 +324,10 @@ func extractAskQuestion(message *models.Message) string {
 		return ""
 	}
 
+	return stripAskPrefix(suffix)
+}
+
+func stripAskPrefix(suffix string) string {
 	after := strings.TrimSpace(suffix)
 	if after == "" {
 		return ""
@@ -335,7 +339,6 @@ func extractAskQuestion(message *models.Message) string {
 	if strings.HasPrefix(afterLower, "ask ") {
 		return strings.TrimSpace(after[len("ask "):])
 	}
-
 	return after
 }
 
@@ -631,15 +634,7 @@ func extractPhotoAskQuestion(message *models.Message) string {
 		}
 		mention, suffix, ok := mentionAndSuffixAtEntity(caption, &entity)
 		if ok && strings.EqualFold(mention, botMention) {
-			after := strings.TrimSpace(suffix)
-			if after == "" || strings.EqualFold(after, "ask") {
-				return ""
-			}
-			afterLower := strings.ToLower(after)
-			if strings.HasPrefix(afterLower, "ask ") {
-				return strings.TrimSpace(after[len("ask "):])
-			}
-			return after
+			return stripAskPrefix(suffix)
 		}
 	}
 
@@ -648,19 +643,7 @@ func extractPhotoAskQuestion(message *models.Message) string {
 		return ""
 	}
 
-	after := strings.TrimSpace(suffix)
-	if after == "" {
-		return ""
-	}
-	afterLower := strings.ToLower(after)
-	if afterLower == "ask" {
-		return ""
-	}
-	if strings.HasPrefix(afterLower, "ask ") {
-		return strings.TrimSpace(after[len("ask "):])
-	}
-
-	return after
+	return stripAskPrefix(suffix)
 }
 
 func containsMention(text, targetMention string) bool {

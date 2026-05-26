@@ -21,7 +21,6 @@ import (
 const (
 	analysisInvalidUsageMsg        = "invalid usage, use !sa SYMBOL (e.g., !sa AAPL)"
 	analysisNotConfiguredMsg       = "Stock analysis is not configured. Enable with STOCK_ANALYSIS_ENABLED=true and configure EXA_API_KEY, GEMINI_API_KEY, and FINNHUB_API_KEY."
-	analysisBlockedMsg             = "%s analysis is not available."
 	analysisFinnhubErrorMsg        = "Failed to fetch stock data for %s. Please try again later."
 	analysisExaErrorMsg            = "Failed to fetch news for %s. Please try again later."
 	analysisTimeoutMsg             = "Analysis timed out for %s. Please try again."

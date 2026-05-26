@@ -1,3 +1,5 @@
+// Package bot provides a Telegram bot for stock analysis, code explanation,
+// LeetCode assistance, and web search via Exa integration.
 package bot
 
 import (

@@ -1,3 +1,5 @@
+// csy-helper-bot is a Telegram bot that provides stock analysis, code
+// explanation, and other developer helper utilities.
 package main
 
 import (

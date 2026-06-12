@@ -17,6 +17,8 @@ import (
 )
 
 const (
+	defaultParallelSearchBaseURL = "https://api.parallel.ai/v1/search"
+
 	defaultParallelTimeout    = 15 * time.Second
 	defaultParallelMaxResults = 5
 	parallelMaxResultsCap     = 10
@@ -29,9 +31,6 @@ const (
 	// large payloads.
 	maxParallelErrorBodyBytes = 1024
 )
-
-// parallelSearchBaseURL is a variable so tests can point it at a local server.
-var parallelSearchBaseURL = "https://api.parallel.ai/v1/search"
 
 type parallelSearchRequest struct {
 	Objective        string                    `json:"objective"`
@@ -55,16 +54,35 @@ type parallelSearchResponse struct {
 	Results  []parallelSearchResult `json:"results"`
 }
 
-func parallelSearchEnabled() bool {
-	return strings.TrimSpace(os.Getenv("PARALLEL_API_KEY")) != ""
+// parallelSearcher calls the Parallel.ai Search API. Configuration is
+// captured at construction so tests can inject a local server without
+// mutating package-level state.
+type parallelSearcher struct {
+	baseURL    string
+	apiKey     string
+	timeout    time.Duration
+	maxResults int
 }
 
-// searchParallel queries the Parallel.ai Search API for fresh web excerpts.
-// The PARALLEL_API_KEY environment variable must be set.
-func searchParallel(ctx context.Context, objective string, queries []string) ([]parallelSearchResult, error) {
+// newParallelSearcher builds a searcher from the environment. It returns nil
+// when PARALLEL_API_KEY is not configured, which disables the feature.
+func newParallelSearcher() *parallelSearcher {
 	apiKey := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY"))
 	if apiKey == "" {
-		return nil, errors.New("PARALLEL_API_KEY not configured")
+		return nil
+	}
+	return &parallelSearcher{
+		baseURL:    defaultParallelSearchBaseURL,
+		apiKey:     apiKey,
+		timeout:    loadParallelTimeout(),
+		maxResults: loadParallelMaxResults(),
+	}
+}
+
+// search queries the Parallel.ai Search API for fresh web excerpts.
+func (p *parallelSearcher) search(ctx context.Context, objective string, queries []string) ([]parallelSearchResult, error) {
+	if p == nil {
+		return nil, errors.New("parallel searcher not configured")
 	}
 
 	objective = strings.TrimSpace(objective)
@@ -75,28 +93,37 @@ func searchParallel(ctx context.Context, objective string, queries []string) ([]
 	reqBody := parallelSearchRequest{
 		Objective:        objective,
 		SearchQueries:    queries,
-		AdvancedSettings: &parallelAdvancedSettings{MaxResults: loadParallelMaxResults()},
+		AdvancedSettings: &parallelAdvancedSettings{MaxResults: p.maxResults},
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal parallel search request: %w", err)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, loadParallelTimeout())
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = defaultParallelTimeout
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodPost, parallelSearchBaseURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodPost, p.baseURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create parallel search request: %w", err)
 	}
-	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("parallel search request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	// Drain the body before closing so the HTTP client can reuse the
+	// underlying connection.
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxParallelErrorBodyBytes))

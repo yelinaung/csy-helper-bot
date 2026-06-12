@@ -83,28 +83,30 @@ func formatTelegramMarkdown(text string) string {
 	return escaped
 }
 
-// normalizeGeneratedTelegramMarkdown strips model-generated escape backslashes
-// until a fixed point, so sequences like `\\!` cannot leave a fresh escape pair
-// behind and normalization stays idempotent.
+// normalizeGeneratedTelegramMarkdown strips model-generated escape
+// backslashes. A backslash run immediately before a MarkdownV2 escape
+// character collapses entirely (repeatedly unescaping one level converges to
+// exactly that), so the result is idempotent in a single O(n) pass: output
+// backslashes only ever precede non-escape characters.
 func normalizeGeneratedTelegramMarkdown(text string) string {
-	for {
-		next := stripGeneratedMarkdownEscapes(text)
-		if next == text {
-			return text
-		}
-		text = next
-	}
-}
-
-func stripGeneratedMarkdownEscapes(text string) string {
 	var out strings.Builder
 	out.Grow(len(text))
 
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' && i+1 < len(text) && strings.ContainsRune(generatedMarkdownEscapes, rune(text[i+1])) {
+	for i := 0; i < len(text); {
+		if text[i] != '\\' {
+			out.WriteByte(text[i])
 			i++
+			continue
 		}
-		out.WriteByte(text[i])
+
+		j := i
+		for j < len(text) && text[j] == '\\' {
+			j++
+		}
+		if j == len(text) || !strings.ContainsRune(generatedMarkdownEscapes, rune(text[j])) {
+			out.WriteString(text[i:j])
+		}
+		i = j
 	}
 
 	return out.String()

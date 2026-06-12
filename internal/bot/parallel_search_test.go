@@ -10,21 +10,24 @@ import (
 	"time"
 )
 
-func withParallelTestServer(t *testing.T, handler http.HandlerFunc) {
+// newTestParallelSearcher starts a local server and returns a searcher
+// pointed at it, avoiding any shared package-level state.
+func newTestParallelSearcher(t *testing.T, handler http.HandlerFunc) *parallelSearcher {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	original := parallelSearchBaseURL
-	parallelSearchBaseURL = server.URL
-	t.Cleanup(func() { parallelSearchBaseURL = original })
+	return &parallelSearcher{
+		baseURL:    server.URL,
+		apiKey:     "test-key",
+		timeout:    5 * time.Second,
+		maxResults: defaultParallelMaxResults,
+	}
 }
 
-func TestSearchParallel_Success(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "test-key")
-
+func TestParallelSearcher_Success(t *testing.T) {
 	var gotRequest parallelSearchRequest
-	withParallelTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -50,9 +53,9 @@ func TestSearchParallel_Success(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
-	results, err := searchParallel(context.Background(), "find latest Go release", []string{"go latest release version"})
+	results, err := searcher.search(context.Background(), "find latest Go release", []string{"go latest release version"})
 	if err != nil {
-		t.Fatalf("searchParallel() error = %v", err)
+		t.Fatalf("search() error = %v", err)
 	}
 
 	if gotRequest.Objective != "find latest Go release" {
@@ -73,33 +76,31 @@ func TestSearchParallel_Success(t *testing.T) {
 	}
 }
 
-func TestSearchParallel_MissingAPIKey(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "  ")
+func TestParallelSearcher_NilSearcher(t *testing.T) {
+	var searcher *parallelSearcher
 
-	_, err := searchParallel(context.Background(), "anything", nil)
-	if err == nil || !strings.Contains(err.Error(), "PARALLEL_API_KEY") {
-		t.Fatalf("expected missing key error, got %v", err)
+	_, err := searcher.search(context.Background(), "anything", nil)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("expected not configured error, got %v", err)
 	}
 }
 
-func TestSearchParallel_EmptyObjective(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "test-key")
+func TestParallelSearcher_EmptyObjective(t *testing.T) {
+	searcher := newTestParallelSearcher(t, func(http.ResponseWriter, *http.Request) {})
 
-	_, err := searchParallel(context.Background(), "  ", nil)
+	_, err := searcher.search(context.Background(), "  ", nil)
 	if err == nil || !strings.Contains(err.Error(), "objective") {
 		t.Fatalf("expected objective error, got %v", err)
 	}
 }
 
-func TestSearchParallel_Non200(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "test-key")
-
-	withParallelTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+func TestParallelSearcher_Non200(t *testing.T) {
+	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error": "quota exceeded"}`))
 	})
 
-	_, err := searchParallel(context.Background(), "anything", []string{"query"})
+	_, err := searcher.search(context.Background(), "anything", []string{"query"})
 	if err == nil || !strings.Contains(err.Error(), "status 429") {
 		t.Fatalf("expected status error, got %v", err)
 	}
@@ -108,16 +109,41 @@ func TestSearchParallel_Non200(t *testing.T) {
 	}
 }
 
-func TestSearchParallel_InvalidJSON(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "test-key")
-
-	withParallelTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+func TestParallelSearcher_InvalidJSON(t *testing.T) {
+	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	})
 
-	_, err := searchParallel(context.Background(), "anything", []string{"query"})
+	_, err := searcher.search(context.Background(), "anything", []string{"query"})
 	if err == nil || !strings.Contains(err.Error(), "decode parallel search response") {
 		t.Fatalf("expected decode error, got %v", err)
+	}
+}
+
+func TestNewParallelSearcher(t *testing.T) {
+	t.Setenv("PARALLEL_API_KEY", "  ")
+	if searcher := newParallelSearcher(); searcher != nil {
+		t.Error("expected nil searcher with blank key")
+	}
+
+	t.Setenv("PARALLEL_API_KEY", "key")
+	t.Setenv("PARALLEL_TIMEOUT_SECONDS", "30")
+	t.Setenv("PARALLEL_MAX_RESULTS", "8")
+	searcher := newParallelSearcher()
+	if searcher == nil {
+		t.Fatal("expected searcher with key set")
+	}
+	if searcher.baseURL != defaultParallelSearchBaseURL {
+		t.Errorf("baseURL = %q", searcher.baseURL)
+	}
+	if searcher.apiKey != "key" {
+		t.Errorf("apiKey = %q", searcher.apiKey)
+	}
+	if searcher.timeout != 30*time.Second {
+		t.Errorf("timeout = %v", searcher.timeout)
+	}
+	if searcher.maxResults != 8 {
+		t.Errorf("maxResults = %d", searcher.maxResults)
 	}
 }
 
@@ -147,18 +173,6 @@ func TestSanitizeParallelResults(t *testing.T) {
 	}
 	if got := runeLen(results[1].Excerpts[0]); got != maxParallelExcerptRuneLen {
 		t.Errorf("expected excerpt truncated to %d runes, got %d", maxParallelExcerptRuneLen, got)
-	}
-}
-
-func TestParallelSearchEnabled(t *testing.T) {
-	t.Setenv("PARALLEL_API_KEY", "")
-	if parallelSearchEnabled() {
-		t.Error("expected disabled with empty key")
-	}
-
-	t.Setenv("PARALLEL_API_KEY", "key")
-	if !parallelSearchEnabled() {
-		t.Error("expected enabled with key set")
 	}
 }
 

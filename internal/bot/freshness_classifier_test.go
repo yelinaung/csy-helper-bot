@@ -141,6 +141,10 @@ func TestClassifySearchNeed_BlockedResponse(t *testing.T) {
 	}
 }
 
+func TestNormalizeSearchPlan_NilPlan(t *testing.T) {
+	normalizeSearchPlan(nil, "message", "question")
+}
+
 func TestNormalizeSearchPlan(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -197,6 +201,13 @@ func TestNormalizeSearchPlan(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildGroundedExplainPrompt_NilRequest(t *testing.T) {
+	_, err := buildGroundedExplainPrompt(nil)
+	if err == nil || !strings.Contains(err.Error(), "request cannot be nil") {
+		t.Fatalf("expected nil request error, got %v", err)
 	}
 }
 

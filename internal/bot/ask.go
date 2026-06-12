@@ -147,7 +147,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 // is grounded in Parallel Search excerpts. Every search-path failure falls
 // back to the plain Gemini answer so users never see a search error.
 func answerTextQuestion(ctx context.Context, quoted string, question string, respondInBurmese bool) (string, error) {
-	if parallelSearchEnabled() {
+	if searcher := newParallelSearcher(); searcher != nil {
 		plan, err := textExplainer.classifySearchNeed(ctx, quoted, question)
 		switch {
 		case err != nil:
@@ -157,7 +157,7 @@ func answerTextQuestion(ctx context.Context, quoted string, question string, res
 				Str("objective", plan.Objective).
 				Strs("search_queries", plan.SearchQueries).
 				Msg("Question needs fresh information; running Parallel search")
-			results, searchErr := searchParallel(ctx, plan.Objective, plan.SearchQueries)
+			results, searchErr := searcher.search(ctx, plan.Objective, plan.SearchQueries)
 			switch {
 			case searchErr != nil:
 				log.Warn().Err(searchErr).Msg("Parallel search failed; answering without web search")

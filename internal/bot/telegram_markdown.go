@@ -20,6 +20,10 @@ var (
 )
 
 func formatTelegramMarkdown(text string) string {
+	// Model output is untrusted: drop invalid UTF-8 and NUL bytes before
+	// formatting so Telegram never receives malformed text.
+	text = strings.ToValidUTF8(text, "�")
+	text = strings.ReplaceAll(text, "\x00", "")
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	tokens := make([]string, 0, 16)
 
@@ -79,15 +83,30 @@ func formatTelegramMarkdown(text string) string {
 	return escaped
 }
 
+// normalizeGeneratedTelegramMarkdown strips model-generated escape
+// backslashes. A backslash run immediately before a MarkdownV2 escape
+// character collapses entirely (repeatedly unescaping one level converges to
+// exactly that), so the result is idempotent in a single O(n) pass: output
+// backslashes only ever precede non-escape characters.
 func normalizeGeneratedTelegramMarkdown(text string) string {
 	var out strings.Builder
 	out.Grow(len(text))
 
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' && i+1 < len(text) && strings.ContainsRune(generatedMarkdownEscapes, rune(text[i+1])) {
+	for i := 0; i < len(text); {
+		if text[i] != '\\' {
+			out.WriteByte(text[i])
 			i++
+			continue
 		}
-		out.WriteByte(text[i])
+
+		j := i
+		for j < len(text) && text[j] == '\\' {
+			j++
+		}
+		if j == len(text) || !strings.ContainsRune(generatedMarkdownEscapes, rune(text[j])) {
+			out.WriteString(text[i:j])
+		}
+		i = j
 	}
 
 	return out.String()

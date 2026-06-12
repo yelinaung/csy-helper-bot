@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,6 +107,29 @@ func TestParallelSearcher_Non200(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "quota exceeded") {
 		t.Errorf("expected error to include response body, got %v", err)
+	}
+}
+
+func TestParallelSearcher_HonorsConfiguredTimeout(t *testing.T) {
+	// Drain the body first: the server only watches for client disconnect
+	// (which cancels the request context) once the body is consumed. Then
+	// hold the request open until the client times out, so the test server
+	// shuts down cleanly afterwards.
+	searcher := newTestParallelSearcher(t, func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	})
+	searcher.timeout = 50 * time.Millisecond
+
+	start := time.Now()
+	_, err := searcher.search(context.Background(), "anything", []string{"query"})
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected context deadline error, got %v", err)
+	}
+	// The searcher's own timeout must govern the request; the shared
+	// 10s httpClient would not have fired yet.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("request took %v, configured timeout not honored", elapsed)
 	}
 }
 

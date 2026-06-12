@@ -32,6 +32,11 @@ const (
 	maxParallelErrorBodyBytes = 1024
 )
 
+// parallelHTTPClient carries no fixed timeout: the shared httpClient's 10s
+// limit would silently cap PARALLEL_TIMEOUT_SECONDS. Every request through it
+// is bounded by the per-call context timeout in search().
+var parallelHTTPClient = &http.Client{}
+
 type parallelSearchRequest struct {
 	Objective        string                    `json:"objective"`
 	SearchQueries    []string                  `json:"search_queries"`
@@ -114,7 +119,7 @@ func (p *parallelSearcher) search(ctx context.Context, objective string, queries
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := parallelHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("parallel search request failed: %w", err)
 	}

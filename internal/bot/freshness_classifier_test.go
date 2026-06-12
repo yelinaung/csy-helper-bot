@@ -104,6 +104,43 @@ func TestClassifySearchNeed_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestClassifySearchNeed_NilGenerator(t *testing.T) {
+	explainer := &geminiExplainer{}
+
+	_, err := explainer.classifySearchNeed(context.Background(), "", "question")
+	if err == nil || !strings.Contains(err.Error(), "gemini client not initialized") {
+		t.Fatalf("expected not initialized error, got %v", err)
+	}
+}
+
+func TestClassifySearchNeed_EmptyResponse(t *testing.T) {
+	explainer := &geminiExplainer{
+		generator: &mockContentGenerator{resp: &genai.GenerateContentResponse{}},
+	}
+
+	_, err := explainer.classifySearchNeed(context.Background(), "", "question")
+	if err == nil || !strings.Contains(err.Error(), "empty classifier response") {
+		t.Fatalf("expected empty response error, got %v", err)
+	}
+}
+
+func TestClassifySearchNeed_BlockedResponse(t *testing.T) {
+	explainer := &geminiExplainer{
+		generator: &mockContentGenerator{
+			resp: &genai.GenerateContentResponse{
+				PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+					BlockReason: genai.BlockedReasonSafety,
+				},
+			},
+		},
+	}
+
+	_, err := explainer.classifySearchNeed(context.Background(), "", "question")
+	if err == nil || !strings.Contains(err.Error(), "classifier response blocked") {
+		t.Fatalf("expected blocked error, got %v", err)
+	}
+}
+
 func TestNormalizeSearchPlan(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -207,6 +244,30 @@ func TestExplainWithSearchResults_RequiresResults(t *testing.T) {
 	}
 }
 
+func TestExplainWithSearchResults_NilExplainer(t *testing.T) {
+	var explainer *geminiExplainer
+
+	results := []parallelSearchResult{
+		{URL: "https://example.com/n1", Title: "Title", Excerpts: []string{"excerpt"}},
+	}
+	_, err := explainer.explainWithSearchResults(context.Background(), "", "question", results, false)
+	if err == nil || !strings.Contains(err.Error(), "gemini client not initialized") {
+		t.Fatalf("expected not initialized error, got %v", err)
+	}
+}
+
+func TestExplainWithSearchResults_RequiresTextOrQuestion(t *testing.T) {
+	explainer := &geminiExplainer{generator: &mockContentGenerator{}}
+
+	results := []parallelSearchResult{
+		{URL: "https://example.com/n2", Title: "Title", Excerpts: []string{"excerpt"}},
+	}
+	_, err := explainer.explainWithSearchResults(context.Background(), "", "", results, false)
+	if err == nil || !strings.Contains(err.Error(), "text or question is required") {
+		t.Fatalf("expected text or question error, got %v", err)
+	}
+}
+
 func TestExplainWithSearchResults_Success(t *testing.T) {
 	generator := &capturingGenerator{}
 	explainer := &geminiExplainer{generator: generator}
@@ -225,5 +286,14 @@ func TestExplainWithSearchResults_Success(t *testing.T) {
 	prompt := generator.capturedContents[0].Parts[0].Text
 	if !strings.Contains(prompt, `"web_results"`) {
 		t.Error("prompt missing web_results payload")
+	}
+	if !strings.Contains(prompt, "https://example.com/latest") {
+		t.Error("prompt missing mapped web_results URL")
+	}
+	if !strings.Contains(prompt, `"News"`) {
+		t.Error("prompt missing mapped web_results title")
+	}
+	if !strings.Contains(prompt, `"excerpt"`) {
+		t.Error("prompt missing mapped web_results excerpt")
 	}
 }

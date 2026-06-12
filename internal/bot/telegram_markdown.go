@@ -20,6 +20,10 @@ var (
 )
 
 func formatTelegramMarkdown(text string) string {
+	// Model output is untrusted: drop invalid UTF-8 and NUL bytes before
+	// formatting so Telegram never receives malformed text.
+	text = strings.ToValidUTF8(text, "�")
+	text = strings.ReplaceAll(text, "\x00", "")
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	tokens := make([]string, 0, 16)
 
@@ -79,7 +83,20 @@ func formatTelegramMarkdown(text string) string {
 	return escaped
 }
 
+// normalizeGeneratedTelegramMarkdown strips model-generated escape backslashes
+// until a fixed point, so sequences like `\\!` cannot leave a fresh escape pair
+// behind and normalization stays idempotent.
 func normalizeGeneratedTelegramMarkdown(text string) string {
+	for {
+		next := stripGeneratedMarkdownEscapes(text)
+		if next == text {
+			return text
+		}
+		text = next
+	}
+}
+
+func stripGeneratedMarkdownEscapes(text string) string {
 	var out strings.Builder
 	out.Grow(len(text))
 

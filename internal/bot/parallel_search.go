@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -22,6 +23,11 @@ const (
 
 	maxParallelExcerptRuneLen  = 300
 	maxParallelExcerptsPerItem = 3
+
+	// maxParallelErrorBodyBytes bounds how much of an error response is
+	// surfaced in errors, keeping quota/validation details without logging
+	// large payloads.
+	maxParallelErrorBodyBytes = 1024
 )
 
 // parallelSearchBaseURL is a variable so tests can point it at a local server.
@@ -93,7 +99,8 @@ func searchParallel(ctx context.Context, objective string, queries []string) ([]
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("parallel search returned status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxParallelErrorBodyBytes))
+		return nil, fmt.Errorf("parallel search returned status %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	var searchResp parallelSearchResponse

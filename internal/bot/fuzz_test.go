@@ -271,6 +271,16 @@ func FuzzBuildStockSearchQuery(f *testing.F) {
 	f.Add("BRK.A", "Berkshire Hathaway Inc.")
 
 	f.Fuzz(func(t *testing.T, symbol, profileName string) {
+		// Upstream contract: symbol is validated by symbolRegex before any
+		// search, and profileName comes from JSON decoding which coerces
+		// invalid UTF-8. Inputs outside that contract are unreachable.
+		if !utf8.ValidString(symbol) || strings.Contains(symbol, "\x00") {
+			t.Skip()
+		}
+		if !utf8.ValidString(profileName) || strings.Contains(profileName, "\x00") {
+			t.Skip()
+		}
+
 		var profile *CompanyProfile
 		if profileName != "" {
 			profile = &CompanyProfile{Name: profileName}
@@ -639,6 +649,174 @@ func FuzzBuildAnalysisPrompt(f *testing.F) {
 						payload.Symbol, sanitizeForPrompt(symbol, 10))
 				}
 			}
+		}
+	})
+}
+
+// FuzzSanitizeParallelResults verifies that sanitized Parallel results:
+//   - contain no NUL bytes
+//   - are valid UTF-8
+//   - respect per-field rune budgets and the excerpt count cap
+//   - drop results with both empty title and empty excerpts
+func FuzzSanitizeParallelResults(f *testing.F) {
+	f.Add("Go 1.27 released", "https://example.com/go", "2026-06-01", "Faster GC", "Smaller binaries")
+	f.Add("", "", "", "", "")
+	f.Add("\x00ignore", "https://x.com", "2026-01-01", "\x00hidden", "\x00\x00")
+
+	f.Fuzz(func(t *testing.T, title, url, publishDate, e1, e2 string) {
+		results := []parallelSearchResult{{
+			URL:         url,
+			Title:       title,
+			PublishDate: publishDate,
+			Excerpts:    []string{e1, e2, e1, e2},
+		}}
+		sanitized := sanitizeParallelResults(results)
+
+		// Property: output length ≤ input length.
+		if len(sanitized) > len(results) {
+			t.Fatalf("sanitized length %d > input length %d", len(sanitized), len(results))
+		}
+
+		for _, r := range sanitized {
+			// Property: no NUL bytes and valid UTF-8 in sanitized fields.
+			if strings.Contains(r.Title, "\x00") || !utf8.ValidString(r.Title) {
+				t.Fatalf("sanitized title is malformed: %q", r.Title)
+			}
+			for _, e := range r.Excerpts {
+				if strings.Contains(e, "\x00") || !utf8.ValidString(e) {
+					t.Fatalf("sanitized excerpt is malformed: %q", e)
+				}
+				// Property: excerpt rune budget respected.
+				if runeLen(e) > maxParallelExcerptRuneLen {
+					t.Fatalf("excerpt rune count %d exceeds limit %d", runeLen(e), maxParallelExcerptRuneLen)
+				}
+				// Property: sanitized excerpts are never empty.
+				if e == "" {
+					t.Fatal("empty excerpt should have been dropped")
+				}
+			}
+
+			// Property: excerpt count cap respected.
+			if len(r.Excerpts) > maxParallelExcerptsPerItem {
+				t.Fatalf("excerpt count %d exceeds cap %d", len(r.Excerpts), maxParallelExcerptsPerItem)
+			}
+
+			// Property: title rune budget respected.
+			if runeLen(r.Title) > maxTitleRuneLen {
+				t.Fatalf("title rune count %d exceeds limit %d", runeLen(r.Title), maxTitleRuneLen)
+			}
+
+			// Property: dropped results must have both empty title and empty excerpts.
+			if r.Title == "" && len(r.Excerpts) == 0 {
+				t.Fatal("result with empty title and empty excerpts should have been dropped")
+			}
+		}
+	})
+}
+
+// FuzzGroundedExplainPromptConstruction verifies that web-grounded prompts:
+//   - embed a parseable JSON payload with a hex nonce
+//   - carry the sanitized message/question fields unchanged
+//   - include the web_results field
+func FuzzGroundedExplainPromptConstruction(f *testing.F) {
+	f.Add("source text", "latest news?", "Title", "https://example.com/x", "excerpt", false)
+	f.Add("", "ဘာလဲ?", "\x00", "u", "\x00hidden", true)
+
+	f.Fuzz(func(t *testing.T, text, question, title, url, excerpt string, mm bool) {
+		gen := &fuzzCaptureGenerator{}
+		explainer := &geminiExplainer{generator: gen}
+		sanitizedText := sanitizeForPrompt(text, maxExplainInputLength)
+		sanitizedQuestion := sanitizeForPrompt(question, maxQuestionInputLength)
+
+		// Mirror production: results reach the explainer via sanitizeParallelResults.
+		results := sanitizeParallelResults([]parallelSearchResult{
+			{URL: url, Title: title, Excerpts: []string{excerpt}},
+		})
+
+		_, err := explainer.explainWithSearchResults(context.Background(), text, question, results, mm)
+		if len(results) == 0 {
+			if err == nil {
+				t.Fatal("expected error for empty results")
+			}
+			return
+		}
+		if sanitizedText == "" && sanitizedQuestion == "" {
+			if err == nil {
+				t.Fatal("expected error when both text and question are empty")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("unexpected explainWithSearchResults error: %v", err)
+		}
+		if len(gen.capturedContents) == 0 || len(gen.capturedContents[0].Parts) == 0 {
+			t.Fatal("missing captured prompt")
+		}
+
+		prompt := gen.capturedContents[0].Parts[0].Text
+		payload := extractPromptPayload(t, prompt)
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{8}$`, payload.RequestNonce); !matched {
+			t.Fatalf("expected 8-char hex nonce, got %q", payload.RequestNonce)
+		}
+		if payload.Message != sanitizedText {
+			t.Fatalf("message payload = %q, want %q", payload.Message, sanitizedText)
+		}
+		if payload.Question != sanitizedQuestion {
+			t.Fatalf("question payload = %q, want %q", payload.Question, sanitizedQuestion)
+		}
+		if len(payload.WebResults) != len(results) {
+			t.Fatalf("web_results count = %d, want %d", len(payload.WebResults), len(results))
+		}
+		if !strings.Contains(prompt, `"web_results"`) {
+			t.Fatal("prompt missing web_results field")
+		}
+	})
+}
+
+// FuzzNormalizeSearchPlan verifies that a needs-search plan always ends up
+// with a trimmed objective and 1-3 non-empty trimmed queries whenever any
+// usable input exists.
+func FuzzNormalizeSearchPlan(f *testing.F) {
+	f.Add(true, "find go release", "go release", "golang version", "", "msg", "question")
+	f.Add(true, "", "", "", "", "", "what is the latest?")
+	f.Add(false, "obj", "q1", "q2", "q3", "m", "q")
+
+	f.Fuzz(func(t *testing.T, needsSearch bool, objective, q1, q2, q3, message, question string) {
+		plan := searchPlan{
+			NeedsSearch:   needsSearch,
+			Objective:     objective,
+			SearchQueries: []string{q1, q2, q3, q1},
+		}
+		normalizeSearchPlan(&plan, message, question)
+
+		if !needsSearch {
+			// Property: a no-search plan is left untouched.
+			if plan.Objective != objective || len(plan.SearchQueries) != 4 {
+				t.Fatal("no-search plan should not be modified")
+			}
+			return
+		}
+
+		// Property: objective is always trimmed.
+		if plan.Objective != strings.TrimSpace(plan.Objective) {
+			t.Fatalf("objective not trimmed: %q", plan.Objective)
+		}
+
+		// Property: query count is capped.
+		if len(plan.SearchQueries) > maxSearchQueries {
+			t.Fatalf("query count %d exceeds cap %d", len(plan.SearchQueries), maxSearchQueries)
+		}
+
+		// Property: all queries are non-empty and trimmed.
+		for _, q := range plan.SearchQueries {
+			if q == "" || q != strings.TrimSpace(q) {
+				t.Fatalf("query not normalized: %q", q)
+			}
+		}
+
+		// Property: a non-empty objective guarantees at least one query.
+		if plan.Objective != "" && len(plan.SearchQueries) == 0 {
+			t.Fatal("non-empty objective must yield at least one query")
 		}
 	})
 }

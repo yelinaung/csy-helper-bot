@@ -32,7 +32,7 @@ A Telegram bot that provides helpful utilities for developers.
 2. Get a free API key from [Finnhub](https://finnhub.io/) for stock prices
 3. Get a Databento API key from [Databento](https://databento.com/) for historical stock data
 4. Get an API key from [Exa](https://exa.ai/) for web search (required for `!sa` command)
-5. (Optional) Get an API key from [Parallel](https://parallel.ai/) so ask questions about current events are grounded in fresh web search results
+5. (Optional) Get an API key from [Parallel](https://parallel.ai/) so questions about current events are grounded in fresh web search results
 6. Create a `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here

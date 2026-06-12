@@ -96,11 +96,28 @@ func TestSearchParallel_Non200(t *testing.T) {
 
 	withParallelTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error": "quota exceeded"}`))
 	})
 
 	_, err := searchParallel(context.Background(), "anything", []string{"query"})
 	if err == nil || !strings.Contains(err.Error(), "status 429") {
 		t.Fatalf("expected status error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "quota exceeded") {
+		t.Errorf("expected error to include response body, got %v", err)
+	}
+}
+
+func TestSearchParallel_InvalidJSON(t *testing.T) {
+	t.Setenv("PARALLEL_API_KEY", "test-key")
+
+	withParallelTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	})
+
+	_, err := searchParallel(context.Background(), "anything", []string{"query"})
+	if err == nil || !strings.Contains(err.Error(), "decode parallel search response") {
+		t.Fatalf("expected decode error, got %v", err)
 	}
 }
 

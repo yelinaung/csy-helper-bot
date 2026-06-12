@@ -27,6 +27,8 @@ func newTestParallelSearcher(t *testing.T, handler http.HandlerFunc) *parallelSe
 }
 
 func TestParallelSearcher_Success(t *testing.T) {
+	t.Parallel()
+
 	var gotRequest parallelSearchRequest
 	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -78,6 +80,8 @@ func TestParallelSearcher_Success(t *testing.T) {
 }
 
 func TestParallelSearcher_NilSearcher(t *testing.T) {
+	t.Parallel()
+
 	var searcher *parallelSearcher
 
 	_, err := searcher.search(context.Background(), "anything", nil)
@@ -87,6 +91,8 @@ func TestParallelSearcher_NilSearcher(t *testing.T) {
 }
 
 func TestParallelSearcher_EmptyObjective(t *testing.T) {
+	t.Parallel()
+
 	searcher := newTestParallelSearcher(t, func(http.ResponseWriter, *http.Request) {})
 
 	_, err := searcher.search(context.Background(), "  ", nil)
@@ -96,6 +102,8 @@ func TestParallelSearcher_EmptyObjective(t *testing.T) {
 }
 
 func TestParallelSearcher_Non200(t *testing.T) {
+	t.Parallel()
+
 	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error": "quota exceeded"}`))
@@ -111,6 +119,8 @@ func TestParallelSearcher_Non200(t *testing.T) {
 }
 
 func TestParallelSearcher_HonorsConfiguredTimeout(t *testing.T) {
+	t.Parallel()
+
 	// Drain the body first: the server only watches for client disconnect
 	// (which cancels the request context) once the body is consumed. Then
 	// hold the request open until the client times out, so the test server
@@ -134,6 +144,8 @@ func TestParallelSearcher_HonorsConfiguredTimeout(t *testing.T) {
 }
 
 func TestParallelSearcher_InvalidJSON(t *testing.T) {
+	t.Parallel()
+
 	searcher := newTestParallelSearcher(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	})
@@ -172,6 +184,8 @@ func TestNewParallelSearcher(t *testing.T) {
 }
 
 func TestSanitizeParallelResults(t *testing.T) {
+	t.Parallel()
+
 	longExcerpt := strings.Repeat("က", maxParallelExcerptRuneLen+50)
 
 	results := sanitizeParallelResults([]parallelSearchResult{

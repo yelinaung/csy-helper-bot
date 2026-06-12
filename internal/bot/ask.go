@@ -131,7 +131,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 			explanation, err = textExplainer.explainWithImage(ctx, imageBytes, mimeType, question, respondInBurmese)
 		}
 	} else {
-		explanation, err = textExplainer.explainWithLanguage(ctx, quoted, question, respondInBurmese)
+		explanation, err = answerTextQuestion(ctx, quoted, question, respondInBurmese)
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to answer ask question")
@@ -140,6 +140,34 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+// answerTextQuestion answers a text-only ask request. When Parallel search is
+// configured and Gemini judges the question to need fresh web data, the answer
+// is grounded in Parallel Search excerpts. Every search-path failure falls
+// back to the plain Gemini answer so users never see a search error.
+func answerTextQuestion(ctx context.Context, quoted string, question string, respondInBurmese bool) (string, error) {
+	if parallelSearchEnabled() {
+		plan, err := textExplainer.classifySearchNeed(ctx, quoted, question)
+		switch {
+		case err != nil:
+			log.Warn().Err(err).Msg("Search-need classification failed; answering without web search")
+		case plan.NeedsSearch:
+			log.Info().
+				Str("objective", plan.Objective).
+				Strs("search_queries", plan.SearchQueries).
+				Msg("Question needs fresh information; running Parallel search")
+			results, searchErr := searchParallel(ctx, plan.Objective, plan.SearchQueries)
+			switch {
+			case searchErr != nil:
+				log.Warn().Err(searchErr).Msg("Parallel search failed; answering without web search")
+			case len(results) > 0:
+				return textExplainer.explainWithSearchResults(ctx, quoted, question, results, respondInBurmese)
+			}
+		}
+	}
+
+	return textExplainer.explainWithLanguage(ctx, quoted, question, respondInBurmese)
 }
 
 func allowExplainRequest(message *models.Message) (bool, time.Duration) {

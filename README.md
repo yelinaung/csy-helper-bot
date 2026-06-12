@@ -32,7 +32,8 @@ A Telegram bot that provides helpful utilities for developers.
 2. Get a free API key from [Finnhub](https://finnhub.io/) for stock prices
 3. Get a Databento API key from [Databento](https://databento.com/) for historical stock data
 4. Get an API key from [Exa](https://exa.ai/) for web search (required for `!sa` command)
-5. Create a `.env` file:
+5. (Optional) Get an API key from [Parallel](https://parallel.ai/) so ask questions about current events are grounded in fresh web search results
+6. Create a `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
@@ -56,12 +57,18 @@ A Telegram bot that provides helpful utilities for developers.
    STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS=300
    # optional (defaults to 5, capped at 20)
    EXA_NUM_RESULTS=5
+   # Web search for fresh-info questions (optional — requires GEMINI_API_KEY)
+   PARALLEL_API_KEY=your_parallel_key_here
+   # optional (defaults to 15)
+   PARALLEL_TIMEOUT_SECONDS=15
+   # optional (defaults to 5, capped at 10)
+   PARALLEL_MAX_RESULTS=5
    ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
    EXPLAIN_RATE_LIMIT_COUNT=5
    EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
    LOG_LEVEL=info
    ```
-5. Run the bot:
+7. Run the bot:
    ```bash
    go run ./cmd/csy-helper-bot
    ```

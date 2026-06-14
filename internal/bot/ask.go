@@ -134,7 +134,13 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		explanation, err = answerTextQuestion(ctx, quoted, question, respondInBurmese)
 	}
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to answer ask question")
+		// A safety block is an expected verdict from Gemini, not an application
+		// fault — log it at WARN so genuine failures stay visible at ERR.
+		if errors.Is(err, ErrExplainBlocked) {
+			log.Warn().Err(err).Msg("Ask question blocked by safety filters")
+		} else {
+			log.Error().Err(err).Msg("Failed to answer ask question")
+		}
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(err))
 		return
 	}

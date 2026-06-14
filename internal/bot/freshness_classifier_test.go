@@ -93,6 +93,44 @@ func TestClassifySearchNeed_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestClassifySearchNeed_TruncatedJSON reproduces the failure mode that the
+// thinking/token budget fix addresses: a gemini-3.x response whose structured
+// JSON is cut off (here mimicking a MAX_TOKENS truncation) must surface as a
+// decode error so the caller falls back to a non-search answer.
+func TestClassifySearchNeed_TruncatedJSON(t *testing.T) {
+	explainer := &geminiExplainer{
+		generator: &capturingJSONGenerator{jsonBody: `{"needs_search":`},
+	}
+
+	_, err := explainer.classifySearchNeed(context.Background(), "", "question")
+	if err == nil || !strings.Contains(err.Error(), "decode classifier response") {
+		t.Fatalf("expected decode error, got %v", err)
+	}
+}
+
+// TestClassifySearchNeed_ThinkingAndTokenBudget pins the request configuration
+// that keeps gemini-3.x from spending its whole output budget on thinking and
+// truncating the JSON verdict.
+func TestClassifySearchNeed_ThinkingAndTokenBudget(t *testing.T) {
+	generator := &capturingJSONGenerator{jsonBody: `{"needs_search": false}`}
+	explainer := &geminiExplainer{generator: generator}
+
+	if _, err := explainer.classifySearchNeed(context.Background(), "", "question"); err != nil {
+		t.Fatalf("classifySearchNeed() error = %v", err)
+	}
+
+	cfg := generator.capturedConfig
+	if cfg.MaxOutputTokens != 2000 {
+		t.Errorf("MaxOutputTokens = %d, want 2000", cfg.MaxOutputTokens)
+	}
+	if cfg.ThinkingConfig == nil {
+		t.Fatal("expected ThinkingConfig to be set")
+	}
+	if cfg.ThinkingConfig.ThinkingLevel != genai.ThinkingLevelLow {
+		t.Errorf("ThinkingLevel = %q, want %q", cfg.ThinkingConfig.ThinkingLevel, genai.ThinkingLevelLow)
+	}
+}
+
 func TestClassifySearchNeed_EmptyInput(t *testing.T) {
 	explainer := &geminiExplainer{
 		generator: &capturingJSONGenerator{jsonBody: `{"needs_search": false}`},

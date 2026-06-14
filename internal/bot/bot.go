@@ -85,6 +85,9 @@ func Run() error {
 	botUserID = me.ID
 	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, requestLoggingMiddleware)
 	b.RegisterHandlerMatchFunc(shouldHandlePhotoAsk, photoAskHandler, requestLoggingMiddleware)
+	// Registered after the ask handlers so a message that both mentions the bot
+	// and contains an x.com link is answered, not just link-rewritten.
+	b.RegisterHandlerMatchFunc(shouldHandleXLink, xLinkHandler, requestLoggingMiddleware)
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
 	if err != nil {

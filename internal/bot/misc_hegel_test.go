@@ -169,7 +169,10 @@ func TestRateLimiterLoaders_Bounds(t *testing.T) {
 		t.Setenv("EXPLAIN_RATE_LIMIT_COUNT", count)
 		t.Setenv("EXPLAIN_RATE_LIMIT_WINDOW_SECONDS", window)
 		rl := loadExplainRateLimiter()
-		if rl == nil || rl.limit <= 0 || rl.window <= 0 {
+		if rl == nil {
+			ht.Fatalf("loadExplainRateLimiter returned nil (count=%q window=%q)",
+				count, window)
+		} else if rl.limit <= 0 || rl.window <= 0 {
 			ht.Fatalf("loadExplainRateLimiter limit=%d window=%v (count=%q window=%q)",
 				rl.limit, rl.window, count, window)
 		}
@@ -177,7 +180,10 @@ func TestRateLimiterLoaders_Bounds(t *testing.T) {
 		t.Setenv("STOCK_ANALYSIS_RATE_LIMIT_COUNT", count)
 		t.Setenv("STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS", window)
 		rl = loadAnalysisRateLimiter()
-		if rl == nil || rl.limit <= 0 || rl.window <= 0 {
+		if rl == nil {
+			ht.Fatalf("loadAnalysisRateLimiter returned nil (count=%q window=%q)",
+				count, window)
+		} else if rl.limit <= 0 || rl.window <= 0 {
 			ht.Fatalf("loadAnalysisRateLimiter limit=%d window=%v (count=%q window=%q)",
 				rl.limit, rl.window, count, window)
 		}

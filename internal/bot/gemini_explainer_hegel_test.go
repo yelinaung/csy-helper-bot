@@ -52,7 +52,11 @@ func TestSanitizeForPrompt_OutputSafety(t *testing.T) {
 		if !utf8.ValidString(out) {
 			ht.Fatalf("output is invalid UTF-8: %q (input=%q)", out, s)
 		}
-		if n > 0 && utf8.RuneCountInString(out) > n {
+		if n == 0 {
+			if out != "" {
+				ht.Fatalf("expected empty output for budget 0, got %q", out)
+			}
+		} else if utf8.RuneCountInString(out) > n {
 			ht.Fatalf("output rune count %d > budget %d",
 				utf8.RuneCountInString(out), n)
 		}

@@ -104,10 +104,18 @@ func TestParseAllowedGroupIDs_Roundtrip(t *testing.T) {
 				ht.Fatalf("missing id %d in result (input=%q)", id, input)
 			}
 		}
-		// Property: no extra IDs (skipping empty tokens and dedup).
-		if len(got) > len(rawIDs) {
-			ht.Fatalf("result has %d keys, input had %d ids (input=%q)",
-				len(got), len(rawIDs), input)
+		// Property: no extra IDs — the parser must not invent nor
+		// retain IDs that were not in rawIDs. A length check alone is
+		// insufficient; if duplicates are removed while an unrelated
+		// extra ID is added, len(got) == len(rawIDs) would pass.
+		rawSet := make(map[int64]struct{}, len(rawIDs))
+		for _, id := range rawIDs {
+			rawSet[id] = struct{}{}
+		}
+		for id := range got {
+			if _, ok := rawSet[id]; !ok {
+				ht.Fatalf("unexpected id %d in result (input=%q)", id, input)
+			}
 		}
 	}, hegel.WithTestCases(200))
 }

@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"hegel.dev/go/hegel"
@@ -21,6 +23,9 @@ import (
 func TestBuildAnalysisPrompt_CascadeBudget(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		symbol := hegel.Draw(ht, hegel.Text().MaxSize(20))
+		if symbol == "" {
+			ht.Assume(false)
+		}
 
 		// Draw a large number of news items with long titles and
 		// highlights, using separately-drawn sizes so hegel can
@@ -49,9 +54,36 @@ func TestBuildAnalysisPrompt_CascadeBudget(t *testing.T) {
 			ht.Fatalf("buildAnalysisPrompt error: %v", err)
 		}
 
-		// Property: prompt must contain the symbol (never dropped).
+		// Property: prompt must be non-empty and contain valid JSON
+		// payload. The symbol is embedded through JSON, which HTML-
+		// escapes <, >, and & (so a raw strings.Contains would miss
+		// them). Parse the payload and check the symbol field.
 		if prompt == "" {
 			ht.Fatal("empty prompt")
+		}
+		// Extract the JSON payload from between the marker and
+		// "Remember:" (same pattern used by FuzzBuildAnalysisPrompt).
+		markerIdx := strings.Index(prompt, analysisPromptPayloadMarker)
+		remIdx := strings.LastIndex(prompt, "Remember:")
+		if markerIdx >= 0 && remIdx > markerIdx {
+			jsonBlock := prompt[markerIdx+len(analysisPromptPayloadMarker) : remIdx]
+			jsonBlock = strings.TrimSpace(jsonBlock)
+			jsonBlock, _ = strings.CutPrefix(jsonBlock, "```json")
+			jsonBlock, _ = strings.CutSuffix(jsonBlock, "```")
+			jsonBlock = strings.TrimSpace(jsonBlock)
+			if jsonBlock != "" {
+				var payload analysisPromptPayload
+				if err := json.Unmarshal([]byte(jsonBlock), &payload); err != nil {
+					ht.Fatalf("invalid JSON payload: %v", err)
+				}
+				// Symbol is sanitized by sanitizeAnalysisInput,
+				// so compare against the sanitized value.
+				wantSymbol := sanitizeForPrompt(symbol, 10)
+				if payload.Symbol != wantSymbol {
+					ht.Fatalf("payload.Symbol = %q, want %q",
+						payload.Symbol, wantSymbol)
+				}
+			}
 		}
 	}, hegel.WithTestCases(200))
 }

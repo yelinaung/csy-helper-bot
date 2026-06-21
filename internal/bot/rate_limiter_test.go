@@ -206,3 +206,41 @@ func TestMemoryRateLimiter_Sweep_Partial(t *testing.T) {
 		t.Fatal("activeKey should still be rate-limited after sweep")
 	}
 }
+
+// TestMemoryRateLimiter_ClockSkewClampsRetryAfter verifies that a
+// backwards clock movement does not produce a retryAfter longer than the
+// window. Before the fix, max(retryAfter, 0) only floored negative values
+// at zero; when now moved backwards past windowStart, now.Sub(windowStart)
+// was negative and retryAfter = window - (-skew) = window + skew, which
+// exceeded the window and misled the user.
+func TestMemoryRateLimiter_ClockSkewClampsRetryAfter(t *testing.T) {
+	rl := newMemoryRateLimiter(1, 10*time.Second)
+	t0 := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+
+	// Fill the limit=1 bucket at t0.
+	ok, _ := rl.allow("k", t0)
+	if !ok {
+		t.Fatal("first request should pass")
+	}
+	// Second request at t0 is rejected with retryAfter = window.
+	ok, retry := rl.allow("k", t0)
+	if ok {
+		t.Fatal("second request at limit should be rejected")
+	}
+	if retry != 10*time.Second {
+		t.Fatalf("retry at t0 = %v, want 10s", retry)
+	}
+
+	// Move the clock backwards by 5 seconds. The naive computation would
+	// produce retryAfter = 10s - (-5s) = 15s, which exceeds the window.
+	ok, retry = rl.allow("k", t0.Add(-5*time.Second))
+	if ok {
+		t.Fatal("request with backwards clock should still be rejected")
+	}
+	if retry > rl.window {
+		t.Fatalf("retryAfter %v exceeds window %v on backwards clock", retry, rl.window)
+	}
+	if retry < 0 {
+		t.Fatalf("retryAfter %v is negative", retry)
+	}
+}

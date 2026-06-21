@@ -70,7 +70,11 @@ func (r *memoryRateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 	}
 
 	retryAfter := r.window - now.Sub(entry.windowStart)
-	retryAfter = max(retryAfter, 0)
+	// Clamp to [0, window]. A backwards clock movement (NTP step,
+	// container clock jump, non-monotonic now) makes now.Sub(windowStart)
+	// negative and retryAfter exceed r.window; without the upper cap the
+	// caller shows the user a retry duration longer than the window.
+	retryAfter = min(max(retryAfter, 0), r.window)
 	return false, retryAfter
 }
 

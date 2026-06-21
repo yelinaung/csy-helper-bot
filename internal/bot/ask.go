@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -413,27 +415,57 @@ func mentionAndSuffixFromText(text, targetMention string) (mention string, suffi
 		return "", "", false
 	}
 
-	lowerText := strings.ToLower(text)
+	// Search case-insensitively without lowercasing the whole text.
+	// strings.ToLower is not byte-length-preserving (e.g. ẞ U+1E9E → ß
+	// shrinks 3 bytes to 2; İ U+0130 → i̇ grows 2 bytes to 3), so byte
+	// offsets found in lowerText do not map back to text. Walk text
+	// rune-by-rune and compare lowercased runes against the lowercased
+	// mention, recording byte offsets in the original string.
 	lowerMention := strings.ToLower(targetMention)
-	searchFrom := 0
+	textBytes := []byte(text)
 
-	for searchFrom < len(lowerText) {
-		idx := strings.Index(lowerText[searchFrom:], lowerMention)
-		if idx == -1 {
-			return "", "", false
+	for startByte := 0; startByte < len(textBytes); {
+		// Try to match the mention starting at this byte offset.
+		endByte, matched := matchMentionAt(textBytes, startByte, lowerMention)
+		if matched && hasMentionBoundaries(textBytes, startByte, endByte) {
+			return string(textBytes[startByte:endByte]), string(textBytes[endByte:]), true
 		}
-		start := searchFrom + idx
-		end := start + len(lowerMention)
-		if hasMentionBoundaries(text, start, end) {
-			return text[start:end], text[end:], true
-		}
-		searchFrom = end
+		// Advance one rune so the next attempt starts at the next rune
+		// boundary. Invalid UTF-8 advances one byte.
+		_, size := utf8.DecodeRune(textBytes[startByte:])
+		startByte += size
 	}
 
 	return "", "", false
 }
 
-func hasMentionBoundaries(text string, start, end int) bool {
+// matchMentionAt reports whether text[startByte:] begins with targetMention
+// (case-insensitive) and returns the byte offset one past the end of the
+// match. It lowercases one rune at a time from text and compares against
+// the pre-lowercased mention runes, so byte offsets always refer to the
+// original text.
+func matchMentionAt(text []byte, startByte int, lowerMention string) (endByte int, ok bool) {
+	textPos := startByte
+	mentionPos := 0
+	for mentionPos < len(lowerMention) {
+		if textPos >= len(text) {
+			return 0, false
+		}
+		// Lowercase one rune from text.
+		r, size := utf8.DecodeRune(text[textPos:])
+		lowerR := unicode.ToLower(r)
+		// Lowercase one rune from the mention at the current position.
+		mr, mSize := utf8.DecodeRuneInString(lowerMention[mentionPos:])
+		if lowerR != mr {
+			return 0, false
+		}
+		textPos += size
+		mentionPos += mSize
+	}
+	return textPos, true
+}
+
+func hasMentionBoundaries(text []byte, start, end int) bool {
 	if start < 0 || end > len(text) || start >= end {
 		return false
 	}

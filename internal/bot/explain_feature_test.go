@@ -1381,6 +1381,59 @@ func TestContainsMention(t *testing.T) {
 	})
 }
 
+// TestMentionAndSuffixFromText_UnicodeByteShift verifies that the fallback
+// mention parser recognizes a mention preceded by characters whose
+// lowercase form has a different UTF-8 byte length. Before the fix,
+// strings.ToLower was applied to the whole text and byte offsets found in
+// the lowercased text were mapped back to the original — which broke for
+// ẞ U+1E9E (3 bytes) → ß (2 bytes) and İ U+0130 (2 bytes) → i̇ (3 bytes),
+// silently dropping the mention.
+func TestMentionAndSuffixFromText_UnicodeByteShift(t *testing.T) {
+	mention := "@csy_helper_dev_bot"
+	suffix := " what is a mutex?"
+	cases := []struct {
+		name   string
+		prefix string
+	}{
+		{"capital sharp s (ẞ → ß, shrinks)", "ẞ "},
+		{"capital I with dot (İ → i̇, grows)", "İ "},
+		{"ascii baseline", "hi "},
+		{"empty prefix", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			text := c.prefix + mention + suffix
+			gotMention, gotSuffix, ok := mentionAndSuffixFromText(text, mention)
+			if !ok {
+				t.Fatalf("expected ok=true, got false for text %q", text)
+			}
+			if gotMention != mention {
+				t.Errorf("mention = %q, want %q", gotMention, mention)
+			}
+			if gotSuffix != suffix {
+				t.Errorf("suffix = %q, want %q", gotSuffix, suffix)
+			}
+		})
+	}
+}
+
+// TestMentionAndSuffixFromText_CaseInsensitive ensures the fallback parser
+// matches mentions regardless of case, since Telegram usernames are
+// case-insensitive.
+func TestMentionAndSuffixFromText_CaseInsensitive(t *testing.T) {
+	text := "hey @CSY_Helper_Dev_Bot explain recursion"
+	gotMention, gotSuffix, ok := mentionAndSuffixFromText(text, "@csy_helper_dev_bot")
+	if !ok {
+		t.Fatal("expected ok=true for case-insensitive match")
+	}
+	if gotMention != "@CSY_Helper_Dev_Bot" {
+		t.Errorf("mention = %q, want %q", gotMention, "@CSY_Helper_Dev_Bot")
+	}
+	if gotSuffix != " explain recursion" {
+		t.Errorf("suffix = %q, want %q", gotSuffix, " explain recursion")
+	}
+}
+
 func TestExtractPhotoAskQuestion(t *testing.T) {
 	prevMention := botMention
 	botMention = testBotMention

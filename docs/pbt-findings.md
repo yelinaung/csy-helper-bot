@@ -44,15 +44,15 @@ concrete.
 - **Impact:** Any `!sa` request where Finnhub returns a `+Inf` target (or
   where upstream parsing produces one) fails with a generic
   "Failed to analyze %s" message instead of degrading gracefully.
-- **Fix:** Replace the guard with a finiteness check. Go's `math` package
-  has no `IsFinite`; use `!math.IsInf(f, 0) && !math.IsNaN(f)` instead.
-  `stock_analysis.go` does not currently import `math`, so add it to the
-  import block.
+- **Fix:** Replace the guard with a finiteness check. The existing `> 0`
+  guards already exclude `NaN` and `-Inf` (both compare false to `> 0`),
+  so only `+Inf` can slip through. `math.IsInf(f, 0)` rejects both infinities
+  and is the clearest expression of "finite". `stock_analysis.go` does not
+  currently import `math`, so add it to the import block.
   ```go
   // import "math"  // add to imports
   if currentPrice > 0 && pt.TargetMean > 0 &&
-     !math.IsInf(currentPrice, 0) && !math.IsNaN(currentPrice) &&
-     !math.IsInf(pt.TargetMean, 0) && !math.IsNaN(pt.TargetMean) {
+     !math.IsInf(currentPrice, 0) && !math.IsInf(pt.TargetMean, 0) {
       spt.UpsidePct = (pt.TargetMean/currentPrice - 1) * 100
   }
   ```

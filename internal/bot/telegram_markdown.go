@@ -39,7 +39,14 @@ func formatTelegramMarkdown(text string) string {
 	addToken := func(value string) string {
 		id := len(tokens)
 		tokens = append(tokens, value)
-		return fmt.Sprintf("TGMARKTOKEN%dX", id)
+		// Prepend NUL byte to the sentinel. sanitizeMarkdownInput
+		// strips all NUL from untrusted input before addToken is
+		// called, so no user-supplied NUL reaches this point. A
+		// sentinel with a NUL prefix can never collide with any
+		// substring of the original text, eliminating the injection
+		// vector where untrusted input coincidentally contains a
+		// sentinel literal that strings.ReplaceAll then corrupts.
+		return fmt.Sprintf("\x00TGMARKTOKEN%02d", id)
 	}
 
 	normalized = markdownCodeBlockRE.ReplaceAllStringFunc(normalized, func(match string) string {
@@ -86,7 +93,7 @@ func formatTelegramMarkdown(text string) string {
 
 	escaped := bot.EscapeMarkdownUnescaped(normalized)
 	for i, token := range slices.Backward(tokens) {
-		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("TGMARKTOKEN%dX", i), token)
+		escaped = strings.ReplaceAll(escaped, fmt.Sprintf("\x00TGMARKTOKEN%02d", i), token)
 	}
 
 	return escaped

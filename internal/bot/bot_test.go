@@ -81,7 +81,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 	mockResponse := graphQLResponse{}
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Title = "Two Sum"
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.TitleSlug = "two-sum"
-	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Difficulty = "Easy"
+	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Difficulty = "Easy" //nolint:goconst
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

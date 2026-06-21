@@ -19,12 +19,21 @@ var (
 	markdownItalicRE     = regexp.MustCompile(`\*([^*\n]+)\*|_([^_\n]+)_`)
 )
 
+// sanitizeMarkdownInput is the shared prelude both Markdown formatters run
+// on untrusted model output: drop invalid UTF-8 and NUL bytes so Telegram
+// never receives malformed text, then normalize CRLF to LF. Both
+// formatTelegramMarkdown and plainTelegramMarkdownText must call this so
+// the MarkdownV2 and plain-text paths can't drift in what they reject.
+func sanitizeMarkdownInput(text string) string {
+	text = strings.ToValidUTF8(text, "")
+	text = strings.ReplaceAll(text, "\x00", "")
+	return strings.ReplaceAll(text, "\r\n", "\n")
+}
+
 func formatTelegramMarkdown(text string) string {
 	// Model output is untrusted: drop invalid UTF-8 and NUL bytes before
 	// formatting so Telegram never receives malformed text.
-	text = strings.ToValidUTF8(text, "�")
-	text = strings.ReplaceAll(text, "\x00", "")
-	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized := sanitizeMarkdownInput(text)
 	tokens := make([]string, 0, 16)
 
 	addToken := func(value string) string {
@@ -113,7 +122,7 @@ func normalizeGeneratedTelegramMarkdown(text string) string {
 }
 
 func plainTelegramMarkdownText(text string) string {
-	normalized := normalizeGeneratedTelegramMarkdown(strings.ReplaceAll(text, "\r\n", "\n"))
+	normalized := normalizeGeneratedTelegramMarkdown(sanitizeMarkdownInput(text))
 
 	normalized = markdownCodeBlockRE.ReplaceAllString(normalized, "$1")
 	normalized = markdownInlineCodeRE.ReplaceAllString(normalized, "$1")

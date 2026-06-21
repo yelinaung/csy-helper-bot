@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -397,8 +398,11 @@ func recommendationToSanitized(rec *RecommendationTrend) *sanitizedRecommendatio
 // upside percentage server-side. quoteCurrentPrice is the actual current
 // price from the fetched quote — Finnhub /stock/price-target may omit
 // lastPrice, so we use the separate quote fetch for the current price.
-// Returns nil if pt is nil. When the current price is zero/negative,
-// UpsidePct is omitted from JSON to guard against +Inf/NaN.
+// Returns nil if pt is nil. Non-finite float fields are coerced to 0 so
+// the result always marshals to valid JSON. UpsidePct is only set when
+// both inputs are positive and the computed quotient is finite; the
+// result guard catches overflow-to-+Inf from huge-but-finite inputs
+// (e.g. MaxFloat64 / SmallestNonzeroFloat64).
 func priceTargetToSanitized(pt *PriceTarget, quoteCurrentPrice float64) *sanitizedPriceTarget {
 	if pt == nil {
 		return nil
@@ -408,16 +412,30 @@ func priceTargetToSanitized(pt *PriceTarget, quoteCurrentPrice float64) *sanitiz
 		currentPrice = pt.CurrentPrice
 	}
 	spt := &sanitizedPriceTarget{
-		TargetHigh:   pt.TargetHigh,
-		TargetLow:    pt.TargetLow,
-		TargetMean:   pt.TargetMean,
-		TargetMedian: pt.TargetMedian,
-		CurrentPrice: currentPrice,
+		TargetHigh:   sanitizeFiniteFloat(pt.TargetHigh),
+		TargetLow:    sanitizeFiniteFloat(pt.TargetLow),
+		TargetMean:   sanitizeFiniteFloat(pt.TargetMean),
+		TargetMedian: sanitizeFiniteFloat(pt.TargetMedian),
+		CurrentPrice: sanitizeFiniteFloat(currentPrice),
 	}
 	if currentPrice > 0 && pt.TargetMean > 0 {
-		spt.UpsidePct = (pt.TargetMean/currentPrice - 1) * 100
+		up := (pt.TargetMean/currentPrice - 1) * 100
+		if !math.IsInf(up, 0) && !math.IsNaN(up) {
+			spt.UpsidePct = up
+		}
 	}
 	return spt
+}
+
+// sanitizeFiniteFloat returns f when it is finite, else 0. Coercing
+// non-finite values to 0 keeps JSON serialization valid (encoding/json
+// rejects +Inf/-Inf/NaN) and matches the "no data" convention callers
+// already handle for zero-valued fields via omitempty tags.
+func sanitizeFiniteFloat(f float64) float64 {
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return 0
+	}
+	return f
 }
 
 // buildAnalysisPrompt builds the full Gemini prompt with JSON payload,

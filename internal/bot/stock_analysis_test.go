@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -2307,6 +2308,74 @@ func TestPriceTargetToSanitized_ZeroPriceGuardsInf(t *testing.T) {
 	// and quoteCurrentPrice are zero.
 	if got.CurrentPrice != 0 {
 		t.Errorf("expected current_price 0, got %f", got.CurrentPrice)
+	}
+}
+
+// TestPriceTargetToSanitized_InfTargetMarshals verifies that +Inf in any
+// field no longer breaks JSON marshalling. Before the fix, +Inf in
+// TargetMean slipped past the `> 0` guard (since +Inf > 0 is true),
+// produced +Inf UpsidePct, and caused json.MarshalIndent in
+// buildAnalysisPrompt to fail with "json: unsupported value: +Inf",
+// aborting the entire !sa prompt build.
+func TestPriceTargetToSanitized_InfTargetMarshals(t *testing.T) {
+	t.Parallel()
+	pt := &PriceTarget{
+		TargetHigh:   math.Inf(1),
+		TargetLow:    math.Inf(-1),
+		TargetMean:   math.Inf(1),
+		TargetMedian: 228,
+		CurrentPrice: 187,
+	}
+	got := priceTargetToSanitized(pt, 187)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if math.IsInf(got.UpsidePct, 0) || math.IsNaN(got.UpsidePct) {
+		t.Fatalf("UpsidePct must be finite, got %f", got.UpsidePct)
+	}
+	// Non-finite pass-through fields must be coerced to 0 so the struct
+	// always marshals.
+	if got.TargetHigh != 0 {
+		t.Errorf("TargetHigh must be coerced to 0 for +Inf, got %f", got.TargetHigh)
+	}
+	if got.TargetLow != 0 {
+		t.Errorf("TargetLow must be coerced to 0 for -Inf, got %f", got.TargetLow)
+	}
+	if got.TargetMean != 0 {
+		t.Errorf("TargetMean must be coerced to 0 for +Inf, got %f", got.TargetMean)
+	}
+	// Marshal must succeed — this is the regression that used to fail.
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("marshal sanitizedPriceTarget failed: %v", err)
+	}
+}
+
+// TestPriceTargetToSanitized_OverflowQuotientGuardsResult verifies that
+// the result guard catches overflow-to-+Inf from huge-but-finite inputs.
+// math.MaxFloat64 / math.SmallestNonzeroFloat64 overflows to +Inf even
+// though both operands are finite and > 0; an input-only guard would miss
+// this and let +Inf reach JSON serialization.
+func TestPriceTargetToSanitized_OverflowQuotientGuardsResult(t *testing.T) {
+	t.Parallel()
+	pt := &PriceTarget{
+		TargetMean:   math.MaxFloat64,
+		TargetHigh:   math.MaxFloat64,
+		TargetLow:    1,
+		TargetMedian: 1,
+		CurrentPrice: math.SmallestNonzeroFloat64,
+	}
+	got := priceTargetToSanitized(pt, math.SmallestNonzeroFloat64)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if math.IsInf(got.UpsidePct, 0) || math.IsNaN(got.UpsidePct) {
+		t.Fatalf("UpsidePct must be finite even on quotient overflow, got %f", got.UpsidePct)
+	}
+	if got.UpsidePct != 0 {
+		t.Errorf("UpsidePct must be 0 when quotient overflows, got %f", got.UpsidePct)
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("marshal failed: %v", err)
 	}
 }
 

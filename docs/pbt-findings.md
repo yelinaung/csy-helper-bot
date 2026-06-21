@@ -44,21 +44,41 @@ concrete.
 - **Impact:** Any `!sa` request where Finnhub returns a `+Inf` target (or
   where upstream parsing produces one) fails with a generic
   "Failed to analyze %s" message instead of degrading gracefully.
-- **Fix:** Replace the guard with a finiteness check. The existing `> 0`
-  guards already exclude `NaN` and `-Inf` (both compare false to `> 0`),
-  so only `+Inf` can slip through. `math.IsInf(f, 0)` rejects both infinities
-  and is the clearest expression of "finite". `stock_analysis.go` does not
-  currently import `math`, so add it to the import block.
+- **Fix:** Guarding only `UpsidePct` is insufficient — `priceTargetToSanitized`
+  copies `TargetHigh`, `TargetLow`, `TargetMean`, `TargetMedian`, and
+  `CurrentPrice` directly into the returned struct (lines 411-415), and any
+  non-finite value in those fields also breaks `json.Marshal`. Either sanitize
+  every float copied into `spt`, or drop the whole field by returning `nil`
+  when the input is unusable. The minimal fix that covers both the `UpsidePct`
+  computation and the marshal is to coerce non-finite values to 0 at copy time:
+
   ```go
-  // import "math"  // add to imports
+  // import "math"  // add to imports — stock_analysis.go does not import it
+  sanitizeFloat := func(f float64) float64 {
+      if math.IsInf(f, 0) || math.IsNaN(f) {
+          return 0
+      }
+      return f
+  }
+  spt := &sanitizedPriceTarget{
+      TargetHigh:   sanitizeFloat(pt.TargetHigh),
+      TargetLow:    sanitizeFloat(pt.TargetLow),
+      TargetMean:   sanitizeFloat(pt.TargetMean),
+      TargetMedian: sanitizeFloat(pt.TargetMedian),
+      CurrentPrice: sanitizeFloat(currentPrice),
+  }
   if currentPrice > 0 && pt.TargetMean > 0 &&
      !math.IsInf(currentPrice, 0) && !math.IsInf(pt.TargetMean, 0) {
       spt.UpsidePct = (pt.TargetMean/currentPrice - 1) * 100
   }
   ```
-  Consider applying the same finiteness guard to every float that flows
-  into `analysisPromptPayload` (`sanitizedQuote`, `sanitizedMetrics`,
-  `sanitizedPriceTarget`).
+
+  The `> 0` guards already exclude `NaN` and `-Inf` (both compare false to
+  `> 0`), so only `+Inf` can reach the `UpsidePct` division; `!math.IsInf(...,
+  0)` is sufficient there. The broader `sanitizeFloat` helper covers the
+  pass-through fields that don't have a `> 0` guard. Consider applying the
+  same helper to every float that flows into `analysisPromptPayload`
+  (`sanitizedQuote`, `sanitizedMetrics`, `sanitizedProfile.MarketCapB`).
 
 ### Bug 2 — `mentionAndSuffixFromText` misses mentions after case-shifting chars
 
@@ -153,7 +173,10 @@ concrete.
 - **Why the existing test misses it:** `FuzzFormatAndNormalizeMarkdown`
   (`fuzz_test.go:375`) asserts the no-NUL / valid-UTF-8 contract for
   `formatTelegramMarkdown` (lines 392-397) but never exercises
-  `plainTelegramMarkdownText` — that function has no test at all.
+  `plainTelegramMarkdownText`. The lone unit test
+  `TestPlainTelegramMarkdownText` (`telegram_markdown_test.go:20`) checks
+  one well-formed input — it doesn't cover NUL bytes, invalid UTF-8, or
+  the safety contract at all.
 - **Impact:** Malformed bytes can reach Telegram on the plain-text
   rendering path, which Telegram may reject or mis-render. Same class of
   bug the markdown path was hardened against; the two formatters are
@@ -184,13 +207,29 @@ each tier is by expected value.
   A stateful model test exercises combinations of operations that
   hand-written tests never do.
 - **Model:** A `map[string]modelEntry` where `modelEntry{windowStart time.Time;
-  count int}`. Rules:
-  - `RuleAllow(key, now)` — draw `key` from a small alphabet, draw `now`
-    from a time range that can move both forward and backward (to catch
-    bug 3). Apply to both subject and model; assert they agree on
-    `(ok, retryAfter)`.
-  - `RuleSweep(now)` — call `sweepLocked(now)` on the subject and prune
-    expired entries from the model.
+  count int}`. In Go Hegel, rule methods take exactly one `hegel.TestCase`
+  parameter; values are drawn inside the rule body, not passed as arguments.
+  ```go
+  // RuleAllow increments or resets a key's window.
+  func (m *rateLimiterMachine) RuleAllow(tc hegel.TestCase) {
+      key := hegel.Draw(tc, hegel.SampledFrom([]string{"a","b","c","d"}))
+      now := m.baseTime.Add(time.Duration(hegel.Draw(tc, hegel.Integers(-3600, 3600))) * time.Second)
+      ok, retry := m.subject.allow(key, now)
+      m.applyModel(key, now)  // update the reference map
+      if !m.agrees(key, ok, retry) {
+          panic("subject and model disagree")
+      }
+  }
+
+  // RuleSweep prunes expired entries.
+  func (m *rateLimiterMachine) RuleSweep(tc hegel.TestCase) {
+      now := m.baseTime.Add(time.Duration(hegel.Draw(tc, hegel.Integers(-3600, 3600))) * time.Second)
+      m.subject.mu.Lock()
+      m.subject.sweepLocked(now)
+      m.subject.mu.Unlock()
+      m.pruneModel(now)
+  }
+  ```
 - **Invariants:**
   - `0 <= retryAfter <= r.window` (fails today → bug 3).
   - A key just reset (new window) has `count == 1` in the subject.
@@ -259,8 +298,13 @@ each tier is by expected value.
   `text[start:end] == sub`.
 - **Generator:** Generate `text` with `hegel.Text()` (full Unicode, so
   supplementary-plane characters that take 2 UTF-16 units are exercised).
-  Draw `startByte` and `endByte` as valid byte offsets into `text`, derive
-  `sub`, then compute the UTF-16 offset/length from those.
+  Draw `startRune` and `endRune` as rune indices (`0 <= startRune <=
+  endRune <= runeCount(text)`), then convert to byte offsets in `text` to
+  derive `sub = text[startByte:endByte]`. UTF-16 entity ranges always
+  correspond to rune boundaries; generating raw byte offsets can land
+  inside a multi-byte rune and produce an unsatisfiable property. Finally,
+  compute the UTF-16 offset/length by walking `text[:startByte]` and
+  `sub` with `utf16UnitsForRune`.
 
 #### 5. Idempotence PBT for `sanitizeForPrompt` and the `sanitize*Results` functions
 
@@ -386,10 +430,12 @@ the list above without renumbering existing entries. Tier is noted inline.
 #### 12. Output-safety PBT for `plainTelegramMarkdownText` — Tier 1
 
 - **Target:** `internal/bot/telegram_markdown.go:115`.
-- **Why:** Catches bug 4. The function currently has no test, and the
-  no-NUL / valid-UTF-8 contract that `FuzzFormatAndNormalizeMarkdown`
-  asserts for `formatTelegramMarkdown` is exactly the contract the plain
-  path violates.
+- **Why:** Catches bug 4. The function's only test
+  (`TestPlainTelegramMarkdownText`, `telegram_markdown_test.go:20`) uses a
+  well-formed input and doesn't cover the no-NUL / valid-UTF-8 contract.
+  `FuzzFormatAndNormalizeMarkdown` asserts that contract for
+  `formatTelegramMarkdown` — the plain path's sibling — but never calls
+  the plain path.
 - **Properties:**
   - `utf8.ValidString(plainTelegramMarkdownText(s))` for all `s`.
   - `!strings.Contains(plainTelegramMarkdownText(s), "\x00")`.
@@ -452,21 +498,33 @@ the list above without renumbering existing entries. Tier is noted inline.
 - **Target:** `internal/bot/gemini_explainer.go:230`.
 - **Properties:**
   - `len(toPromptWebResults(rs)) <= len(rs)` (structural).
-  - Per-field rune budgets hold on every output element.
   - No-crash on arbitrary `[]parallelSearchResult`.
+- **Budget caveat:** `toPromptWebResults` only copies fields — per-field
+  rune budgets are enforced by `sanitizeParallelResults`
+  (`parallel_search.go:154`) upstream. A budget property must target
+  `toPromptWebResults(sanitizeParallelResults(rs))`, not
+  `toPromptWebResults(rs)` alone, or it will fail on inputs the function
+  was never responsible for cleaning.
 - **Generator:** build `[]parallelSearchResult` inline with `hegel.Text()`
-  fields and `hegel.Lists(...)` for the slice.
+  fields and `hegel.Lists(...)` for the slice. For the budget variant,
+  pipe through `sanitizeParallelResults` first.
 
 #### 16. Robustness PBT for `formatLeetCodeMessage` — Tier 2
 
 - **Target:** `internal/bot/leetcode.go:121`.
-- **Properties:**
-  - Never panics on an arbitrary `*LeetCodeQuestion` (including nil/empty
-    fields).
+- **Contract note:** The function dereferences `question` immediately at
+  line 128 (`question.Difficulty`). Its contract requires a non-nil
+  pointer; do **not** include nil in the PBT or it will report a
+  contract violation, not a bug.
+- **Properties:** For any non-nil `*LeetCodeQuestion` with arbitrary
+  field values:
+  - Never panics.
   - If it routes through Telegram markdown, output is NUL-free and valid
     UTF-8 (same safety contract as bug 4).
 - **Generator:** build `LeetCodeQuestion` inline with `hegel.Text()`
-  fields; include the nil case.
+  fields; draw `Difficulty` from `hegel.SampledFrom([]string{"Easy",
+  "Medium", "Hard", ""})` plus `hegel.Text()` to exercise the
+  unknown-difficulty path. Skip nil.
 
 #### Considered and skipped
 

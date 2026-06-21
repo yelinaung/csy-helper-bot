@@ -42,3 +42,6 @@ Thumbs.db
 .env.decrypted
 *.decrypted
 .sops.yaml
+
+# Hegel property-based testing
+.hegel/

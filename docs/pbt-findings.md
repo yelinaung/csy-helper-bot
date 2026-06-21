@@ -44,13 +44,15 @@ concrete.
 - **Impact:** Any `!sa` request where Finnhub returns a `+Inf` target (or
   where upstream parsing produces one) fails with a generic
   "Failed to analyze %s" message instead of degrading gracefully.
-- **Fix:** Guarding only `UpsidePct` is insufficient — `priceTargetToSanitized`
-  copies `TargetHigh`, `TargetLow`, `TargetMean`, `TargetMedian`, and
-  `CurrentPrice` directly into the returned struct (lines 411-415), and any
-  non-finite value in those fields also breaks `json.Marshal`. Either sanitize
-  every float copied into `spt`, or drop the whole field by returning `nil`
-  when the input is unusable. The minimal fix that covers both the `UpsidePct`
-  computation and the marshal is to coerce non-finite values to 0 at copy time:
+- **Fix:** Guarding only the inputs to `UpsidePct` is insufficient on two
+  fronts. First, `priceTargetToSanitized` copies `TargetHigh`, `TargetLow`,
+  `TargetMean`, `TargetMedian`, and `CurrentPrice` directly into the
+  returned struct (lines 411-415), and any non-finite value in those fields
+  also breaks `json.Marshal`. Second, even when both inputs to the division
+  are finite and `> 0`, the quotient can overflow to `+Inf` — e.g.
+  `math.MaxFloat64 / math.SmallestNonzeroFloat64` — so guarding the inputs
+  does not guarantee a finite result. Guard the **result**, not just the
+  inputs, and coerce non-finite pass-through fields to 0 at copy time:
 
   ```go
   // import "math"  // add to imports — stock_analysis.go does not import it
@@ -67,18 +69,32 @@ concrete.
       TargetMedian: sanitizeFloat(pt.TargetMedian),
       CurrentPrice: sanitizeFloat(currentPrice),
   }
-  if currentPrice > 0 && pt.TargetMean > 0 &&
-     !math.IsInf(currentPrice, 0) && !math.IsInf(pt.TargetMean, 0) {
-      spt.UpsidePct = (pt.TargetMean/currentPrice - 1) * 100
+  if currentPrice > 0 && pt.TargetMean > 0 {
+      up := (pt.TargetMean/currentPrice - 1) * 100
+      if !math.IsInf(up, 0) && !math.IsNaN(up) {
+          spt.UpsidePct = up
+      }
   }
   ```
 
-  The `> 0` guards already exclude `NaN` and `-Inf` (both compare false to
-  `> 0`), so only `+Inf` can reach the `UpsidePct` division; `!math.IsInf(...,
-  0)` is sufficient there. The broader `sanitizeFloat` helper covers the
-  pass-through fields that don't have a `> 0` guard. Consider applying the
-  same helper to every float that flows into `analysisPromptPayload`
-  (`sanitizedQuote`, `sanitizedMetrics`, `sanitizedProfile.MarketCapB`).
+  Rationale for each check:
+  - `sanitizeFloat` on the pass-through fields: those have no `> 0` guard,
+    so `NaN`, `+Inf`, and `-Inf` all reach `json.Marshal` and must be
+    coerced.
+  - `> 0` on `currentPrice` and `pt.TargetMean`: excludes `NaN` and `-Inf`
+    (both compare false to `> 0`), so only finite positive values (plus
+    `+Inf`, which `sanitizeFloat` already handled on the pass-through) reach
+    the division.
+  - `!math.IsInf(up, 0) && !math.IsNaN(up)` on the **result**: catches the
+    overflow-to-`+Inf` case from huge-but-finite inputs. `IsNaN` on the
+    result is technically unreachable when both operands are finite and
+    `> 0`, but it's cheap insurance and keeps the code honestly matching
+    the "always finite" property asserted by opportunity #2 below —
+    without it, the PBT and the fix disagree.
+
+  Consider applying the same `sanitizeFloat` helper to every float that
+  flows into `analysisPromptPayload` (`sanitizedQuote`,
+  `sanitizedMetrics`, `sanitizedProfile.MarketCapB`).
 
 ### Bug 2 — `mentionAndSuffixFromText` misses mentions after case-shifting chars
 
@@ -250,10 +266,15 @@ each tier is by expected value.
   on the first run.
 - **Properties:**
   - `UpsidePct` is always finite (`!IsNaN && !IsInf`).
-  - `json.Marshal(priceTargetToSanitized(pt, cp))` never errors.
-  - When `currentPrice > 0 && TargetMean > 0` and both are finite,
-    `UpsidePct ≈ (TargetMean/currentPrice - 1) * 100` within float
-    tolerance.
+  - `json.Marshal(priceTargetToSanitized(pt, cp))` never errors (covers
+    both `UpsidePct` and the pass-through `TargetHigh`/`Low`/`Mean`/
+    `Median`/`CurrentPrice` fields, which the fix in Bug 1 coerces via
+    `sanitizeFloat`).
+  - When `currentPrice > 0 && TargetMean > 0`, both are finite, and the
+    quotient `(TargetMean/currentPrice - 1) * 100` is itself finite,
+    `UpsidePct` equals that quotient within float tolerance. When the
+    quotient overflows to `+Inf` (e.g. `MaxFloat64 / SmallestNonzeroFloat64`),
+    `UpsidePct` is 0 — the result guard drops it.
   - Nil pointer returns nil.
 - **Generalize:** The same finiteness-and-marshal property applies to
   every float field that flows into `analysisPromptPayload`:

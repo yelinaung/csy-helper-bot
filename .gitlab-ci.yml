@@ -69,9 +69,10 @@ test:
   before_script:
   - export GOCACHE="$(pwd)/.cache/go-build"
   - export GOMODCACHE="$(pwd)/.cache/go-mod"
-  # Hegel's server binary requires glibc; the Alpine-based image uses musl.
-  # gcompat provides ld-linux-x86-64.so.2 and other glibc stubs.
-  - apk add --no-cache gcompat
+  # Hegel's native library requires glibc; the Alpine-based image uses musl.
+  # gcompat provides ld-linux-x86-64.so.2 and other glibc stubs; libgcc
+  # provides libgcc_s.so.1, which libhegel-linux-amd64.so links against.
+  - apk add --no-cache gcompat libgcc
   script:
   - go test -v ./...
   - |

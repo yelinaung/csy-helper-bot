@@ -65,25 +65,28 @@ func TestBuildAnalysisPrompt_CascadeBudget(t *testing.T) {
 		// "Remember:" (same pattern used by FuzzBuildAnalysisPrompt).
 		markerIdx := strings.Index(prompt, analysisPromptPayloadMarker)
 		remIdx := strings.LastIndex(prompt, "Remember:")
-		if markerIdx >= 0 && remIdx > markerIdx {
-			jsonBlock := prompt[markerIdx+len(analysisPromptPayloadMarker) : remIdx]
-			jsonBlock = strings.TrimSpace(jsonBlock)
-			jsonBlock, _ = strings.CutPrefix(jsonBlock, "```json")
-			jsonBlock, _ = strings.CutSuffix(jsonBlock, "```")
-			jsonBlock = strings.TrimSpace(jsonBlock)
-			if jsonBlock != "" {
-				var payload analysisPromptPayload
-				if err := json.Unmarshal([]byte(jsonBlock), &payload); err != nil {
-					ht.Fatalf("invalid JSON payload: %v", err)
-				}
-				// Symbol is sanitized by sanitizeAnalysisInput,
-				// so compare against the sanitized value.
-				wantSymbol := sanitizeForPrompt(symbol, 10)
-				if payload.Symbol != wantSymbol {
-					ht.Fatalf("payload.Symbol = %q, want %q",
-						payload.Symbol, wantSymbol)
-				}
-			}
+		if markerIdx < 0 || remIdx <= markerIdx {
+			ht.Fatalf("prompt missing expected markers: marker=%d remember=%d",
+				markerIdx, remIdx)
+		}
+		jsonBlock := prompt[markerIdx+len(analysisPromptPayloadMarker) : remIdx]
+		jsonBlock = strings.TrimSpace(jsonBlock)
+		jsonBlock, _ = strings.CutPrefix(jsonBlock, "```json")
+		jsonBlock, _ = strings.CutSuffix(jsonBlock, "```")
+		jsonBlock = strings.TrimSpace(jsonBlock)
+		if jsonBlock == "" {
+			ht.Fatal("empty JSON payload after trimming")
+		}
+		var payload analysisPromptPayload
+		if err := json.Unmarshal([]byte(jsonBlock), &payload); err != nil {
+			ht.Fatalf("invalid JSON payload: %v", err)
+		}
+		// Symbol is sanitized by sanitizeAnalysisInput,
+		// so compare against the sanitized value.
+		wantSymbol := sanitizeForPrompt(symbol, 10)
+		if payload.Symbol != wantSymbol {
+			ht.Fatalf("payload.Symbol = %q, want %q",
+				payload.Symbol, wantSymbol)
 		}
 	}, hegel.WithTestCases(200))
 }

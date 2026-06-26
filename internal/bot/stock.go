@@ -22,6 +22,10 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 var (
@@ -104,6 +108,7 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	if msg, blocked := blockedStockResponse(symbol); blocked {
+		appotel.RecordOutcome(ctx, "blocked")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -140,6 +145,7 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote")
 		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("Failed to fetch stock quote for %s. Please try again later.", symbol))
 		return
@@ -150,6 +156,7 @@ func stockHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to fetch company profile")
 	}
 
+	appotel.RecordOutcome(ctx, "success")
 	sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, formatStockMessage(symbol, quote, profile))
 }
 
@@ -166,6 +173,11 @@ func handleHistoricalStock(
 ) {
 	bars, adjustedNote, err := fetchHistoricalBars(ctx, symbol, days)
 	if err != nil {
+		if errors.Is(err, errDatabentoAPIKeyNotConfigured) {
+			appotel.RecordOutcome(ctx, "not_configured")
+		} else {
+			appotel.RecordOutcome(ctx, "error")
+		}
 		msg := fmt.Sprintf("Failed to fetch %d-day historical data for %s. Please try again later.", days, symbol)
 		if errors.Is(err, errDatabentoAPIKeyNotConfigured) {
 			msg = "Historical data is unavailable: DATABENTO_API_KEY is not configured."
@@ -174,6 +186,9 @@ func handleHistoricalStock(
 		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, msg)
 		return
 	}
+	// All remaining paths (no data, chart-render fallback, photo or text reply)
+	// are completed operations, so they count as success.
+	appotel.RecordOutcome(ctx, "success")
 	if len(bars) == 0 {
 		sendOrEditStockResult(ctx, b, update, loadingMsg, loadingErr, fmt.Sprintf("No historical data returned for %s in the last %d days.", symbol, days))
 		return
@@ -336,7 +351,19 @@ func blockedStockResponse(symbol string) (string, bool) {
 	return msg, ok
 }
 
-func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
+func fetchStockQuote(ctx context.Context, symbol string) (quote *StockQuote, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.quote",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "quote"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
@@ -366,19 +393,31 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
-	var quote StockQuote
-	if err := json.NewDecoder(resp.Body).Decode(&quote); err != nil {
+	var decoded StockQuote
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, err
 	}
 
-	if quote.CurrentPrice == 0 {
+	if decoded.CurrentPrice == 0 {
 		return nil, errors.New("symbol not found or no data available")
 	}
 
-	return &quote, nil
+	return &decoded, nil
 }
 
-func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, error) {
+func fetchCompanyProfile(ctx context.Context, symbol string) (profile *CompanyProfile, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.profile",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "profile"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
@@ -408,12 +447,12 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (*CompanyProfile, e
 		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
-	var profile CompanyProfile
-	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+	var decoded CompanyProfile
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, err
 	}
 
-	return &profile, nil
+	return &decoded, nil
 }
 
 func formatStockMessage(symbol string, quote *StockQuote, profile *CompanyProfile) string {
@@ -534,7 +573,20 @@ func historicalDateRangeUTC(now time.Time, days int) dbn_hist.DateRange {
 
 // getHistoricalRangeWithContext performs a context-aware Databento
 // timeseries.get_range request and returns raw DBN bytes.
-func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *dbn_hist.SubmitJobParams) ([]byte, error) {
+func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *dbn_hist.SubmitJobParams) (body []byte, err error) {
+	ctx, span := tracer().Start(
+		ctx, "databento.get_range",
+		trace.WithAttributes(
+			attribute.String("databento.dataset", params.Dataset),
+			attribute.Int64("databento.schema", int64(params.Schema)),
+			attribute.String("symbol", params.Symbols),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	formData := url.Values{}
 	if err := params.ApplyToURLValues(&formData); err != nil {
 		return nil, fmt.Errorf("bad params: %w", err)
@@ -561,7 +613,7 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

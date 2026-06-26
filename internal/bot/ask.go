@@ -18,6 +18,10 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 func initGeminiExplainer() (*geminiExplainer, error) {
@@ -53,6 +57,7 @@ func loadGeminiTimeout() (time.Duration, error) {
 
 func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if textExplainer == nil {
+		appotel.RecordOutcome(ctx, "not_configured")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -78,6 +83,8 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	allowed, retryAfter := allowExplainRequest(update.Message)
 	if !allowed {
+		appotel.RecordOutcome(ctx, "rate_limited")
+		recordRateLimited(ctx, "explain")
 		var userID int64
 		if update.Message.From != nil {
 			userID = update.Message.From.ID
@@ -122,6 +129,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if repliedPhoto != nil {
 		imageBytes, mimeType, downloadErr := downloadTelegramPhoto(ctx, b, repliedPhoto.FileID)
 		if downloadErr != nil {
+			appotel.RecordOutcome(ctx, "error")
 			log.Error().Err(downloadErr).Msg("Failed to download replied photo")
 			sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
 				"Failed to download the replied image. Please try again.")
@@ -139,14 +147,17 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		// A safety block is an expected verdict from Gemini, not an application
 		// fault — log it at WARN so genuine failures stay visible at ERR.
 		if errors.Is(err, ErrExplainBlocked) {
+			appotel.RecordOutcome(ctx, "blocked")
 			log.Warn().Err(err).Msg("Ask question blocked by safety filters")
 		} else {
+			appotel.RecordOutcome(ctx, "error")
 			log.Error().Err(err).Msg("Failed to answer ask question")
 		}
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(err))
 		return
 	}
 
+	appotel.RecordOutcome(ctx, "success")
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
 }
 
@@ -542,7 +553,16 @@ func extractRepliedPhoto(message *models.Message) *models.PhotoSize {
 	return extractPhoto(message.ReplyToMessage)
 }
 
-func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) ([]byte, string, error) {
+func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) (image []byte, mimeType string, err error) {
+	ctx, span := tracer().Start(
+		ctx, "telegram.download_photo",
+		trace.WithAttributes(attribute.String("telegram.file_id", truncateFileID(fileID))),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
 	if err != nil {
 		return nil, "", fmt.Errorf("get file %s: %w", fileID, err)
@@ -572,7 +592,7 @@ func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) ([]by
 		return nil, "", fmt.Errorf("read photo body: %w", err)
 	}
 
-	mimeType := http.DetectContentType(imageBytes)
+	mimeType = http.DetectContentType(imageBytes)
 	if !strings.HasPrefix(mimeType, "image/") {
 		mimeType = mime.TypeByExtension(path.Ext(file.FilePath))
 	}
@@ -599,6 +619,7 @@ func shouldHandlePhotoAsk(update *models.Update) bool {
 
 func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if textExplainer == nil {
+		appotel.RecordOutcome(ctx, "not_configured")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -609,6 +630,8 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	allowed, retryAfter := allowExplainRequest(update.Message)
 	if !allowed {
+		appotel.RecordOutcome(ctx, "rate_limited")
+		recordRateLimited(ctx, "explain")
 		var userID int64
 		if update.Message.From != nil {
 			userID = update.Message.From.ID
@@ -648,6 +671,7 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	photo := extractPhoto(update.Message)
 	if photo == nil {
+		appotel.RecordOutcome(ctx, "error")
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
 			"Failed to process the image. Please try again.")
 		return
@@ -655,6 +679,7 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	imageBytes, mimeType, downloadErr := downloadTelegramPhoto(ctx, b, photo.FileID)
 	if downloadErr != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(downloadErr).Msg("Failed to download photo")
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
 			"Failed to download the image. Please try again.")
@@ -678,11 +703,17 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 
 	if explainErr != nil {
+		if errors.Is(explainErr, ErrExplainBlocked) {
+			appotel.RecordOutcome(ctx, "blocked")
+		} else {
+			appotel.RecordOutcome(ctx, "error")
+		}
 		log.Error().Err(explainErr).Msg("Failed to answer photo ask question")
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(explainErr))
 		return
 	}
 
+	appotel.RecordOutcome(ctx, "success")
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
 }
 
@@ -720,4 +751,14 @@ func containsMention(text, targetMention string) bool {
 	}
 	_, _, ok := mentionAndSuffixFromText(text, targetMention)
 	return ok
+}
+
+// truncateFileID limits a Telegram file_id to a short prefix so the attribute
+// value stays low-cardinality and does not leak the full opaque identifier.
+func truncateFileID(fileID string) string {
+	const maxLen = 16
+	if len(fileID) <= maxLen {
+		return fileID
+	}
+	return fileID[:maxLen] + "..."
 }

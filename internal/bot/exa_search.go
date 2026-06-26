@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -65,7 +67,7 @@ type cachedExaResults struct {
 // searchStockNews queries the Exa API for recent news about a stock and
 // returns sanitized results. Results are cached for exaCacheTTL. The
 // EXA_API_KEY environment variable must be set.
-func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile) ([]exaSearchResult, error) {
+func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile) (results []exaSearchResult, err error) {
 	apiKey := strings.TrimSpace(os.Getenv("EXA_API_KEY"))
 	if apiKey == "" {
 		return nil, errors.New("EXA_API_KEY not configured")
@@ -81,6 +83,18 @@ func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile
 		return cached.results, nil
 	}
 	exaCacheMu.Unlock()
+
+	ctx, span := tracer().Start(
+		ctx, "exa.search",
+		trace.WithAttributes(
+			attribute.String("exa.query", query),
+			attribute.Int("exa.num_results", numResults),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
 
 	startDate := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
 	reqBody := exaSearchRequest{
@@ -128,7 +142,7 @@ func searchStockNews(ctx context.Context, symbol string, profile *CompanyProfile
 		Int("result_count", len(searchResp.Results)).
 		Msg("Exa search completed")
 
-	results := sanitizeExaResults(searchResp.Results)
+	results = sanitizeExaResults(searchResp.Results)
 
 	exaCacheMu.Lock()
 	if len(exaCache) >= exaCacheMaxEntries {

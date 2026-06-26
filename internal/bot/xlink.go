@@ -9,6 +9,8 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/rs/zerolog/log"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 // maxXLinksPerMessage caps how many rewritten links the bot echoes back for a
@@ -61,12 +63,15 @@ func xLinkHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		},
 	})
 	if err != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Warn().
 			Err(err).
 			Int64("chat_id", update.Message.Chat.ID).
 			Int("link_count", len(links)).
 			Msg("Failed to send rewritten x.com links")
+		return
 	}
+	appotel.RecordOutcome(ctx, "success")
 }
 
 // extractFixedXLinks pulls every tweet URL out of text and returns the

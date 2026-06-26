@@ -18,6 +18,13 @@ run = [
   "GOCACHE=$PWD/.cache/go-build CGO_ENABLED=1 go test -v -race ./...",
 ]
 
+[tasks."test-integration"]
+description = "Run integration tests (no-op until an integration suite exists)"
+run = [
+  "mkdir -p .cache/go-build .cache/go-mod",
+  "GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/go-mod go test -v -tags=integration ./...",
+]
+
 [tasks.lint]
 description = "Run golangci-lint with project config"
 run = [

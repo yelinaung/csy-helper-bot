@@ -13,7 +13,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/genai"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 const (
@@ -333,11 +338,58 @@ func (g *geminiExplainer) explainWithTextAndImage(ctx context.Context, text stri
 	return doExplain(ctx, g, prompt, &imageInput{data: imageData, mimeType: mimeType}, tone)
 }
 
-func doExplain(ctx context.Context, g *geminiExplainer, prompt string, image *imageInput, tone string) (string, error) {
+// geminiGenAIAttrs returns the standard GenAI semconv span attributes for a
+// Gemini generate_content call.
+func geminiGenAIAttrs(model string) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.provider.name", "gemini"),
+		attribute.String("gen_ai.operation.name", "generate_content"),
+		attribute.String("gen_ai.request.model", model),
+	}
+}
+
+// recordGeminiTokenUsage records the gen_ai.client.token.usage histogram for
+// input and output tokens when resp.UsageMetadata is non-nil.
+func recordGeminiTokenUsage(ctx context.Context, model string, resp *genai.GenerateContentResponse) {
+	if resp == nil || resp.UsageMetadata == nil {
+		return
+	}
+	um := resp.UsageMetadata
+	base := []attribute.KeyValue{
+		attribute.String("gen_ai.provider.name", "gemini"),
+		attribute.String("gen_ai.request.model", model),
+	}
+	hist := appotel.Instruments().GenAITokenUsage
+	if um.PromptTokenCount > 0 {
+		hist.Record(ctx, float64(um.PromptTokenCount), metric.WithAttributes(append(base,
+			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeInput))...))
+	}
+	if um.CandidatesTokenCount > 0 {
+		hist.Record(ctx, float64(um.CandidatesTokenCount), metric.WithAttributes(append(base,
+			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeOutput))...))
+	}
+}
+
+func doExplain(ctx context.Context, g *geminiExplainer, prompt string, image *imageInput, tone string) (result string, err error) {
 	timeout := g.explainTimeout
 	if timeout <= 0 {
 		timeout = defaultExplainTimeout
 	}
+
+	model := strings.TrimSpace(g.model)
+	if model == "" {
+		model = defaultGeminiModelName
+	}
+
+	ctx, span := tracer().Start(
+		ctx, "gemini.explain",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(geminiGenAIAttrs(model)...),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -360,11 +412,6 @@ func doExplain(ctx context.Context, g *geminiExplainer, prompt string, image *im
 		},
 	}
 
-	model := strings.TrimSpace(g.model)
-	if model == "" {
-		model = defaultGeminiModelName
-	}
-
 	parts := []*genai.Part{{Text: prompt}}
 	if image != nil {
 		parts = append(parts, genai.NewPartFromBytes(image.data, image.mimeType))
@@ -385,6 +432,7 @@ func doExplain(ctx context.Context, g *geminiExplainer, prompt string, image *im
 	if resp == nil {
 		return "", errors.New("empty response from Gemini")
 	}
+	recordGeminiTokenUsage(ctx, model, resp)
 	if blocked, reason := isGeminiResponseBlocked(resp); blocked {
 		log.Warn().Str("reason", reason).Msg("Gemini blocked explain response")
 		return "", ErrExplainBlocked

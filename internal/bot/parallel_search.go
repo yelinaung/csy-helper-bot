@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -85,10 +87,22 @@ func newParallelSearcher() *parallelSearcher {
 }
 
 // search queries the Parallel.ai Search API for fresh web excerpts.
-func (p *parallelSearcher) search(ctx context.Context, objective string, queries []string) ([]parallelSearchResult, error) {
+func (p *parallelSearcher) search(ctx context.Context, objective string, queries []string) (results []parallelSearchResult, err error) {
 	if p == nil {
 		return nil, errors.New("parallel searcher not configured")
 	}
+
+	ctx, span := tracer().Start(
+		ctx, "parallel.search",
+		trace.WithAttributes(
+			attribute.String("parallel.objective", strings.TrimSpace(objective)),
+			attribute.Int("parallel.queries_count", len(queries)),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
 
 	objective = strings.TrimSpace(objective)
 	if objective == "" {

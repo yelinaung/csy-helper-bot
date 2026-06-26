@@ -11,6 +11,10 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 type LeetCodeQuestion struct {
@@ -47,6 +51,7 @@ type graphQLResponse struct {
 func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	question, err := fetchDailyLeetCode(ctx)
 	if err != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(err).Msg("Failed to fetch LeetCode daily question")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
@@ -56,6 +61,7 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
+	appotel.RecordOutcome(ctx, "success")
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
@@ -63,7 +69,16 @@ func lcHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	})
 }
 
-func fetchDailyLeetCode(ctx context.Context) (*LeetCodeQuestion, error) {
+func fetchDailyLeetCode(ctx context.Context) (question *LeetCodeQuestion, err error) {
+	ctx, span := tracer().Start(
+		ctx, "leetcode.daily",
+		trace.WithAttributes(attribute.String("leetcode.operation", "daily_challenge")),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	query := `{
 		activeDailyCodingChallengeQuestion {
 			question {

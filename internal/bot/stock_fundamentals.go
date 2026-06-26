@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // financialMetricsResponse is the top-level JSON envelope from
@@ -100,7 +103,19 @@ type PriceTarget struct {
 
 // fetchFinancialMetrics fetches fundamental metrics from Finnhub
 // GET /stock/metric?metric=all. Returns nil and an error on failure.
-func fetchFinancialMetrics(ctx context.Context, symbol string) (*FinancialMetrics, error) {
+func fetchFinancialMetrics(ctx context.Context, symbol string) (metrics *FinancialMetrics, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.metrics",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "metrics"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
@@ -140,7 +155,19 @@ func fetchFinancialMetrics(ctx context.Context, symbol string) (*FinancialMetric
 
 // fetchEarningsHistory fetches the last 4 quarterly earnings from
 // Finnhub GET /stock/earnings?limit=4.
-func fetchEarningsHistory(ctx context.Context, symbol string) ([]EarningsEntry, error) {
+func fetchEarningsHistory(ctx context.Context, symbol string) (entries []EarningsEntry, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.earnings",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "earnings"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
@@ -170,18 +197,30 @@ func fetchEarningsHistory(ctx context.Context, symbol string) ([]EarningsEntry, 
 		return nil, fmt.Errorf(unexpectedCodeErrMsg, resp.StatusCode)
 	}
 
-	var entries []EarningsEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+	var decoded []EarningsEntry
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, err
 	}
 
-	return entries, nil
+	return decoded, nil
 }
 
 // fetchRecommendation returns the most recent analyst consensus, or nil
 // if the Finnhub response is an empty array. Internally decodes
 // []RecommendationTrend and takes the first element.
-func fetchRecommendation(ctx context.Context, symbol string) (*RecommendationTrend, error) {
+func fetchRecommendation(ctx context.Context, symbol string) (trend *RecommendationTrend, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.recommendation",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "recommendation"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")
@@ -225,7 +264,19 @@ func fetchRecommendation(ctx context.Context, symbol string) (*RecommendationTre
 
 // fetchPriceTarget fetches analyst price targets from
 // Finnhub GET /stock/price-target. Returns nil and an error on failure.
-func fetchPriceTarget(ctx context.Context, symbol string) (*PriceTarget, error) {
+func fetchPriceTarget(ctx context.Context, symbol string) (target *PriceTarget, err error) {
+	ctx, span := tracer().Start(
+		ctx, "finnhub.price_target",
+		trace.WithAttributes(
+			attribute.String("finnhub.endpoint", "price_target"),
+			attribute.String("symbol", symbol),
+		),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
 	apiKey := os.Getenv("FINNHUB_API_KEY")
 	if apiKey == "" {
 		return nil, errors.New("FINNHUB_API_KEY not configured")

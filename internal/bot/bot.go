@@ -19,6 +19,13 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 var (
@@ -32,6 +39,43 @@ var (
 	allowedGroups         map[int64]struct{}
 )
 
+// wireOTelTransports wraps the package-level HTTP clients' transports with
+// otelhttp. It MUST run after appotel.Setup has installed the global meter
+// provider: otelhttp binds its client metric instruments eagerly at
+// construction time, so wrapping before Setup leaves metrics on the noop
+// meter. Called from Run() (which main invokes after Setup). The WrapClient
+// helper guards against double-wrapping. Tests replace the whole *http.Client
+// vars, bypassing the wrapper; with the noop tracer (test default) nothing is
+// emitted.
+func wireOTelTransports() {
+	appotel.WrapClient(httpClient)
+	appotel.WrapClient(histHTTPClient)
+	appotel.WrapClient(parallelHTTPClient)
+}
+
+// tracer is the package-level tracer for bot operations.
+func tracer() trace.Tracer {
+	return otel.Tracer("csy-helper-bot/bot")
+}
+
+// recordSpanError records err on the span and marks its status ERROR so
+// failures are visible in traces. It is a no-op when err is nil.
+func recordSpanError(span trace.Span, err error) {
+	if err == nil {
+		return
+	}
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+}
+
+// recordRateLimited increments the bot.rate_limited.total counter for the
+// given feature ("explain" or "analysis").
+func recordRateLimited(ctx context.Context, feature string) {
+	appotel.Instruments().RateLimitedTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("feature", feature),
+	))
+}
+
 const (
 	finnhubBaseURL       = "https://finnhub.io/api/v1"
 	leetCodeGraphQLURL   = "https://leetcode.com/graphql"
@@ -43,6 +87,10 @@ const (
 func Run() error {
 	_ = godotenv.Load()
 
+	// Wire OTel HTTP instrumentation after the caller (main) has run
+	// appotel.Setup, so otelhttp binds metrics to the real meter provider.
+	wireOTelTransports()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
@@ -52,13 +100,16 @@ func Run() error {
 	}
 
 	opts := []bot.Option{
-		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
-			logIncomingUpdate(update, false)
-			if !enforceChatAccess(ctx, b, update) {
-				return
-			}
-			logUnmatchedMessage(update)
-		}),
+		bot.WithDefaultHandler(tracingMiddleware(
+			"bot.unmatched", "",
+			func(ctx context.Context, b *bot.Bot, update *models.Update) {
+				logIncomingUpdate(update, false)
+				if !enforceChatAccess(ctx, b, update) {
+					return
+				}
+				logUnmatchedMessage(update)
+			},
+		)),
 	}
 
 	b, err := bot.New(token, opts...)
@@ -66,14 +117,14 @@ func Run() error {
 		return err
 	}
 
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, startHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, helpHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "/lc", bot.MatchTypeExact, lcHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa", bot.MatchTypeExact, stockAnalysisHandler, requestLoggingMiddleware)
-	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa ", bot.MatchTypePrefix, stockAnalysisHandler, requestLoggingMiddleware)
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, startHandler, obs("bot.start", "/start"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypeExact, helpHandler, obs("bot.help", "/help"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "/lc", bot.MatchTypeExact, lcHandler, obs("bot.lc", "/lc"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!lc", bot.MatchTypeExact, lcHandler, obs("bot.lc", "!lc"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!s", bot.MatchTypeExact, stockHandler, obs("bot.stock", "!s"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!s ", bot.MatchTypePrefix, stockHandler, obs("bot.stock", "!s "))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa", bot.MatchTypeExact, stockAnalysisHandler, obs("bot.stock_analysis", "!sa"))
+	b.RegisterHandler(bot.HandlerTypeMessageText, "!sa ", bot.MatchTypePrefix, stockAnalysisHandler, obs("bot.stock_analysis", "!sa "))
 
 	me, err := b.GetMe(ctx)
 	if err != nil {
@@ -83,11 +134,11 @@ func Run() error {
 		botMention = "@" + strings.ToLower(me.Username)
 	}
 	botUserID = me.ID
-	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, requestLoggingMiddleware)
-	b.RegisterHandlerMatchFunc(shouldHandlePhotoAsk, photoAskHandler, requestLoggingMiddleware)
+	b.RegisterHandlerMatchFunc(shouldHandleAskMention, askHandler, obs("bot.ask", ""))
+	b.RegisterHandlerMatchFunc(shouldHandlePhotoAsk, photoAskHandler, obs("bot.photo_ask", ""))
 	// Registered after the ask handlers so a message that both mentions the bot
 	// and contains an x.com link is answered, not just link-rewritten.
-	b.RegisterHandlerMatchFunc(shouldHandleXLink, xLinkHandler, requestLoggingMiddleware)
+	b.RegisterHandlerMatchFunc(shouldHandleXLink, xLinkHandler, obs("bot.xlink", ""))
 
 	allowedGroups, err = parseAllowedGroupIDs(os.Getenv("ALLOWED_GROUP_IDS"))
 	if err != nil {
@@ -175,6 +226,75 @@ func requestLoggingMiddleware(next bot.HandlerFunc) bot.HandlerFunc {
 			return
 		}
 		next(ctx, b, update)
+	}
+}
+
+// tracingMiddleware is the outermost handler wrapper. It opens a span named
+// after the handler's operation, injects an outcome recorder into the context,
+// and records the command counter/duration metrics at span end. The default
+// result is "unknown" (never "success") so dashboards never show a false green.
+func tracingMiddleware(name string, literal string, next bot.HandlerFunc) bot.HandlerFunc {
+	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		ctx, span := tracer().Start(
+			ctx, name,
+			trace.WithSpanKind(trace.SpanKindInternal),
+		)
+		defer span.End()
+
+		ctx, recorder := appotel.WithOutcomeRecorder(ctx)
+		applyUpdateAttributes(span, name, literal, update)
+
+		start := time.Now()
+		next(ctx, b, update)
+		elapsed := time.Since(start)
+
+		result := recorder.Result()
+		span.SetAttributes(attribute.String("bot.result", result))
+		if result == "error" {
+			span.SetStatus(codes.Error, "")
+		}
+
+		resultAttrs := []attribute.KeyValue{
+			attribute.String("bot.command", name),
+			attribute.String("bot.result", result),
+		}
+		inst := appotel.Instruments()
+		inst.CommandsTotal.Add(ctx, 1, metric.WithAttributes(resultAttrs...))
+		inst.CommandDuration.Record(ctx, elapsed.Seconds(), metric.WithAttributes(resultAttrs...))
+	}
+}
+
+// applyUpdateAttributes sets the common bot.* span attributes from an update.
+func applyUpdateAttributes(span trace.Span, name string, literal string, update *models.Update) {
+	attrs := []attribute.KeyValue{
+		attribute.String("bot.command", name),
+	}
+	if literal != "" {
+		attrs = append(attrs, attribute.String("bot.command.literal", literal))
+	}
+	if update != nil {
+		attrs = append(attrs, attribute.Int64("bot.update_id", update.ID))
+		if update.Message != nil {
+			attrs = append(
+				attrs,
+				attribute.Int64("bot.chat_id", update.Message.Chat.ID),
+				attribute.String("bot.chat_type", string(update.Message.Chat.Type)),
+			)
+			if update.Message.From != nil {
+				attrs = append(attrs, attribute.Int64("bot.user_id", update.Message.From.ID))
+			}
+		}
+	}
+	span.SetAttributes(attrs...)
+}
+
+// obs composes the tracing middleware (outer) with the request logging
+// middleware (inner) and returns a single bot.Middleware. literal is the
+// exact command text the user typed (e.g. "/lc" vs "!lc"); it is recorded in
+// the bot.command.literal attribute.
+func obs(name string, literal string) bot.Middleware {
+	return func(next bot.HandlerFunc) bot.HandlerFunc {
+		return tracingMiddleware(name, literal, requestLoggingMiddleware(next))
 	}
 }
 
@@ -365,6 +485,7 @@ func startHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            "Welcome! I'm your helper bot. Use /help to see what I can do.",
 	})
+	appotel.RecordOutcome(ctx, "success")
 }
 
 func helpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -382,6 +503,7 @@ Mention + question - Ask anything (e.g., @%s what is a mutex?)`, strings.TrimPre
 		MessageThreadID: update.Message.MessageThreadID,
 		Text:            helpText,
 	})
+	appotel.RecordOutcome(ctx, "success")
 }
 
 // initStockAnalyzer initializes the stock analyzer when all required

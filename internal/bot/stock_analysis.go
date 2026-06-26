@@ -16,7 +16,10 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/genai"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 const (
@@ -564,7 +567,7 @@ the JSON field values.`, noNewsNote, analysisPromptPayloadMarker, payloadJSON), 
 
 // analyze calls Gemini to synthesize stock analysis from market data
 // and news highlights.
-func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) (string, error) {
+func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) (result string, err error) {
 	nonce, err := generateNonce()
 	if err != nil {
 		return "", err
@@ -596,7 +599,17 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 		model = defaultGeminiModelName
 	}
 
-	resp, err := a.generator.GenerateContent(timeoutCtx, model, []*genai.Content{
+	analyzeCtx, span := tracer().Start(
+		timeoutCtx, "gemini.analyze",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(geminiGenAIAttrs(model)...),
+	)
+	defer func() {
+		recordSpanError(span, err)
+		span.End()
+	}()
+
+	resp, err := a.generator.GenerateContent(analyzeCtx, model, []*genai.Content{
 		{Role: "user", Parts: []*genai.Part{{Text: prompt}}},
 	}, config)
 	if err != nil {
@@ -608,6 +621,7 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	if resp == nil {
 		return "", errors.New("empty response from Gemini")
 	}
+	recordGeminiTokenUsage(analyzeCtx, model, resp)
 	if blocked, reason := isGeminiResponseBlocked(resp); blocked {
 		log.Warn().Str("reason", reason).Msg("Gemini blocked analysis response")
 		return "", ErrExplainBlocked
@@ -713,6 +727,7 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 	}
 
 	if stockAnalyzerInstance == nil {
+		appotel.RecordOutcome(ctx, "not_configured")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -722,6 +737,7 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 	}
 
 	if msg, blocked := blockedStockResponse(symbol); blocked {
+		appotel.RecordOutcome(ctx, "blocked")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -736,6 +752,8 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 
 	allowed, retryAfter := allowAnalysisRequest(update.Message)
 	if !allowed {
+		appotel.RecordOutcome(ctx, "rate_limited")
+		recordRateLimited(ctx, "analysis")
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
@@ -764,6 +782,7 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 
 	quote, err := fetchStockQuote(ctx, symbol)
 	if err != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch stock quote for analysis")
 		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr,
 			fmt.Sprintf(analysisFinnhubErrorMsg, symbol))
@@ -777,6 +796,7 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 
 	exaResults, err := searchStockNews(ctx, symbol, profile)
 	if err != nil {
+		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch news for analysis")
 		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr,
 			fmt.Sprintf(analysisExaErrorMsg, symbol))
@@ -826,6 +846,14 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 
 	analysis, err := stockAnalyzerInstance.analyze(ctx, input)
 	if err != nil {
+		switch {
+		case errors.Is(err, ErrExplainTimeout):
+			appotel.RecordOutcome(ctx, "timeout")
+		case errors.Is(err, ErrExplainBlocked):
+			appotel.RecordOutcome(ctx, "blocked")
+		default:
+			appotel.RecordOutcome(ctx, "error")
+		}
 		log.Error().Err(err).Str("symbol", symbol).Msg("Stock analysis failed")
 
 		errText := fmt.Sprintf(analysisFailedMsg, symbol)
@@ -840,5 +868,6 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 		return
 	}
 
+	appotel.RecordOutcome(ctx, "success")
 	sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, analysis)
 }

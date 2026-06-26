@@ -92,18 +92,28 @@ func (s sanitizeReadOnlySpan) Links() []trace.Link {
 
 // redactURLAttrs returns a copy of attrs with credentials stripped from any
 // URL-bearing attribute key. The original slice is returned unchanged when it
-// is empty or contains no redactable values.
+// is empty or contains no redactable values, so the common case (spans with
+// no URL attributes) allocates nothing.
 func redactURLAttrs(attrs []attribute.KeyValue) []attribute.KeyValue {
 	if len(attrs) == 0 {
 		return attrs
 	}
-	out := make([]attribute.KeyValue, len(attrs))
+	var out []attribute.KeyValue
 	for i, kv := range attrs {
 		if _, ok := urlAttrKeys[string(kv.Key)]; ok && kv.Value.Type() == attribute.STRING {
+			if out == nil {
+				out = make([]attribute.KeyValue, len(attrs))
+				copy(out, attrs[:i])
+			}
 			out[i] = attribute.String(string(kv.Key), redactURL(kv.Value.AsString()))
 			continue
 		}
-		out[i] = kv
+		if out != nil {
+			out[i] = kv
+		}
+	}
+	if out == nil {
+		return attrs
 	}
 	return out
 }

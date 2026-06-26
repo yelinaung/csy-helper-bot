@@ -355,18 +355,20 @@ func recordGeminiTokenUsage(ctx context.Context, model string, resp *genai.Gener
 		return
 	}
 	um := resp.UsageMetadata
-	base := []attribute.KeyValue{
-		attribute.String("gen_ai.provider.name", "gemini"),
-		attribute.String("gen_ai.request.model", model),
-	}
 	hist := appotel.Instruments().GenAITokenUsage
 	if um.PromptTokenCount > 0 {
-		hist.Record(ctx, float64(um.PromptTokenCount), metric.WithAttributes(append(base,
-			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeInput))...))
+		hist.Record(ctx, float64(um.PromptTokenCount), metric.WithAttributes(
+			attribute.String("gen_ai.provider.name", "gemini"),
+			attribute.String("gen_ai.request.model", model),
+			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeInput),
+		))
 	}
 	if um.CandidatesTokenCount > 0 {
-		hist.Record(ctx, float64(um.CandidatesTokenCount), metric.WithAttributes(append(base,
-			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeOutput))...))
+		hist.Record(ctx, float64(um.CandidatesTokenCount), metric.WithAttributes(
+			attribute.String("gen_ai.provider.name", "gemini"),
+			attribute.String("gen_ai.request.model", model),
+			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeOutput),
+		))
 	}
 }
 

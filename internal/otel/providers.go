@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"io"
+	"sync"
 
 	"go.opentelemetry.io/otel/metric"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -91,20 +92,19 @@ func (p *Providers) Shutdown(ctx context.Context) error {
 }
 
 // joinShutdown returns a one-shot shutdown that runs each closer in order and
-// returns the first error. Subsequent calls return nil.
+// returns the first error. Subsequent calls return nil. sync.Once makes it
+// safe to call concurrently (e.g. from tests or custom shutdown wiring).
 func joinShutdown(closers []func(context.Context) error) func(context.Context) error {
-	var ran bool
+	var once sync.Once
+	var firstErr error
 	return func(ctx context.Context) error {
-		if ran {
-			return nil
-		}
-		ran = true
-		var firstErr error
-		for _, c := range closers {
-			if err := c(ctx); err != nil && firstErr == nil {
-				firstErr = err
+		once.Do(func() {
+			for _, c := range closers {
+				if err := c(ctx); err != nil && firstErr == nil {
+					firstErr = err
+				}
 			}
-		}
+		})
 		return firstErr
 	}
 }

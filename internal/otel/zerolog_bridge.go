@@ -1,6 +1,7 @@
 package otel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -38,24 +39,33 @@ type otelLogWriter struct {
 }
 
 func (w *otelLogWriter) Write(p []byte) (int, error) {
-	// Always report the full write so zerolog does not retry.
+	// Always report the full write so zerolog does not retry. Split on the byte
+	// slice directly to avoid allocating a string copy of p per write (logging
+	// is a hot path).
 	n := len(p)
-
-	for line := range strings.Lines(string(p)) {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	for len(p) > 0 {
+		idx := bytes.IndexByte(p, '\n')
+		var line []byte
+		if idx >= 0 {
+			line = p[:idx]
+			p = p[idx+1:]
+		} else {
+			line = p
+			p = nil
 		}
-		w.emitLine(line)
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			w.emitLine(line)
+		}
 	}
 	return n, nil
 }
 
 // emitLine decodes one zerolog JSON line into an OTel log record.
-func (w *otelLogWriter) emitLine(line string) {
+func (w *otelLogWriter) emitLine(line []byte) {
 	// UseNumber preserves integer fidelity for large IDs/timestamps that lose
 	// precision as float64; toLogAttribute handles json.Number explicitly.
-	dec := json.NewDecoder(strings.NewReader(line))
+	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.UseNumber()
 
 	var fields map[string]any

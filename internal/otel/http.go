@@ -24,20 +24,40 @@ func NewHTTPTransport(base http.RoundTripper) http.RoundTripper {
 	}
 	return otelhttp.NewTransport(
 		base,
-		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
-			// otelhttp passes an empty operation string for client spans, so
-			// use the HTTP method explicitly to get names like "GET finnhub.io".
-			method := operation
-			if r != nil && r.Method != "" {
-				method = r.Method
-			}
-			host := ""
-			if r != nil && r.URL != nil {
-				host = r.URL.Host
-			}
-			return fmt.Sprintf("%s %s", method, host)
-		}),
+		otelhttp.WithSpanNameFormatter(hostSpanNameFormatter),
 	)
+}
+
+// NewHTTPTransportWithFilter behaves like NewHTTPTransport but skips tracing for
+// any request where keep returns false. It is used for the Telegram Bot API
+// client to exclude the long-poll getUpdates call, which would otherwise emit a
+// span on every poll cycle. The same eager-meter caveat as NewHTTPTransport
+// applies: call this after Setup has installed the SDK meter provider.
+func NewHTTPTransportWithFilter(base http.RoundTripper, keep func(*http.Request) bool) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return otelhttp.NewTransport(
+		base,
+		otelhttp.WithSpanNameFormatter(hostSpanNameFormatter),
+		otelhttp.WithFilter(keep),
+	)
+}
+
+// hostSpanNameFormatter names client spans "<METHOD> <HOST>" (never the full
+// URL) to avoid leaking credentials some endpoints place in the path/query.
+func hostSpanNameFormatter(operation string, r *http.Request) string {
+	// otelhttp passes an empty operation string for client spans, so use the
+	// HTTP method explicitly to get names like "GET finnhub.io".
+	method := operation
+	if r != nil && r.Method != "" {
+		method = r.Method
+	}
+	host := ""
+	if r != nil && r.URL != nil {
+		host = r.URL.Host
+	}
+	return fmt.Sprintf("%s %s", method, host)
 }
 
 // WrapClient wraps c's transport with otelhttp, guarding against

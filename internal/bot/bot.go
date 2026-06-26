@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,31 @@ func wireOTelTransports() {
 	appotel.WrapClient(httpClient)
 	appotel.WrapClient(histHTTPClient)
 	appotel.WrapClient(parallelHTTPClient)
+}
+
+// telegramPollTimeout matches the go-telegram/bot default: the long-poll
+// getUpdates server timeout is (pollTimeout - 1s) and the HTTP client timeout
+// is pollTimeout, leaving a 1s margin.
+const telegramPollTimeout = time.Minute
+
+// newTelegramHTTPClient builds the HTTP client the bot library uses for all
+// Telegram Bot API calls, instrumented with otelhttp so sends/edits/getFile show
+// up as child spans. The long-poll getUpdates request is excluded from tracing
+// to avoid emitting a span every poll cycle. Must be called after Setup so
+// otelhttp binds its metrics to the real meter provider (Run calls it after
+// wireOTelTransports).
+func newTelegramHTTPClient() *http.Client {
+	transport := appotel.NewHTTPTransportWithFilter(http.DefaultTransport, func(r *http.Request) bool {
+		if r == nil || r.URL == nil {
+			return true
+		}
+		// Telegram method is the last path segment: /bot<token>/<method>.
+		return !strings.EqualFold(path.Base(r.URL.Path), "getUpdates")
+	})
+	return &http.Client{
+		Timeout:   telegramPollTimeout,
+		Transport: transport,
+	}
 }
 
 // tracer is the package-level tracer for bot operations.
@@ -101,6 +127,7 @@ func Run() error {
 	}
 
 	opts := []bot.Option{
+		bot.WithHTTPClient(telegramPollTimeout, newTelegramHTTPClient()),
 		bot.WithDefaultHandler(tracingMiddleware(
 			"bot.unmatched", "",
 			func(ctx context.Context, b *bot.Bot, update *models.Update) {

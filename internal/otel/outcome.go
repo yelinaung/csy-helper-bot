@@ -10,6 +10,13 @@ import (
 // is "unknown", not "success".
 const OutcomeUnknown = "unknown"
 
+// OutcomeRecorder exposes the recorded handler outcome. The concrete
+// implementation is unexported; callers interact only through this interface.
+type OutcomeRecorder interface {
+	// Result returns the current outcome under the mutex.
+	Result() string
+}
+
 type outcomeKey struct{}
 
 // outcomeRecorder lets a handler communicate its outcome to the outer tracing
@@ -23,7 +30,7 @@ type outcomeRecorder struct {
 
 // withOutcomeRecorder returns a context carrying a fresh recorder (default
 // result OutcomeUnknown) and the recorder itself for the middleware to read.
-func withOutcomeRecorder(ctx context.Context) (context.Context, *outcomeRecorder) {
+func withOutcomeRecorder(ctx context.Context) (context.Context, OutcomeRecorder) {
 	r := &outcomeRecorder{result: OutcomeUnknown}
 	return context.WithValue(ctx, outcomeKey{}, r), r
 }
@@ -31,7 +38,7 @@ func withOutcomeRecorder(ctx context.Context) (context.Context, *outcomeRecorder
 // WithOutcomeRecorder is the exported wrapper returning the context and the
 // recorder's Result accessor. It is used by the tracing middleware in
 // internal/bot.
-func WithOutcomeRecorder(ctx context.Context) (context.Context, *outcomeRecorder) {
+func WithOutcomeRecorder(ctx context.Context) (context.Context, OutcomeRecorder) {
 	return withOutcomeRecorder(ctx)
 }
 

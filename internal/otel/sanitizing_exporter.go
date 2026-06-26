@@ -46,9 +46,10 @@ func (e *sanitizingExporter) Shutdown(ctx context.Context) error {
 	return e.base.Shutdown(ctx)
 }
 
-// sanitizeReadOnlySpan embeds a ReadOnlySpan and overrides Attributes so URL
-// credentials are redacted at export time. All other interface methods are
-// delegated to the wrapped span via the embedded interface.
+// sanitizeReadOnlySpan embeds a ReadOnlySpan and overrides the attribute-
+// bearing accessors (Attributes, Events, Links) so URL credentials are
+// redacted at export time. All other interface methods are delegated to the
+// wrapped span via the embedded interface.
 type sanitizeReadOnlySpan struct {
 	trace.ReadOnlySpan
 }
@@ -56,12 +57,48 @@ type sanitizeReadOnlySpan struct {
 // Attributes returns the span attributes with credentials stripped from any
 // URL-bearing attribute key.
 func (s sanitizeReadOnlySpan) Attributes() []attribute.KeyValue {
-	original := s.ReadOnlySpan.Attributes()
+	return redactURLAttrs(s.ReadOnlySpan.Attributes())
+}
+
+// Events returns the span events with credentials stripped from any
+// URL-bearing attribute on each event.
+func (s sanitizeReadOnlySpan) Events() []trace.Event {
+	original := s.ReadOnlySpan.Events()
 	if len(original) == 0 {
 		return original
 	}
-	out := make([]attribute.KeyValue, len(original))
-	for i, kv := range original {
+	out := make([]trace.Event, len(original))
+	for i, e := range original {
+		e.Attributes = redactURLAttrs(e.Attributes)
+		out[i] = e
+	}
+	return out
+}
+
+// Links returns the span links with credentials stripped from any URL-bearing
+// attribute on each link.
+func (s sanitizeReadOnlySpan) Links() []trace.Link {
+	original := s.ReadOnlySpan.Links()
+	if len(original) == 0 {
+		return original
+	}
+	out := make([]trace.Link, len(original))
+	for i, l := range original {
+		l.Attributes = redactURLAttrs(l.Attributes)
+		out[i] = l
+	}
+	return out
+}
+
+// redactURLAttrs returns a copy of attrs with credentials stripped from any
+// URL-bearing attribute key. The original slice is returned unchanged when it
+// is empty or contains no redactable values.
+func redactURLAttrs(attrs []attribute.KeyValue) []attribute.KeyValue {
+	if len(attrs) == 0 {
+		return attrs
+	}
+	out := make([]attribute.KeyValue, len(attrs))
+	for i, kv := range attrs {
 		if _, ok := urlAttrKeys[string(kv.Key)]; ok && kv.Value.Type() == attribute.STRING {
 			out[i] = attribute.String(string(kv.Key), redactURL(kv.Value.AsString()))
 			continue

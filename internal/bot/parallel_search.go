@@ -95,7 +95,11 @@ func (p *parallelSearcher) search(ctx context.Context, objective string, queries
 	ctx, span := tracer().Start(
 		ctx, "parallel.search",
 		trace.WithAttributes(
-			attribute.String("parallel.objective", strings.TrimSpace(objective)),
+			// Record only the objective length, not the raw text: the objective
+			// can fall back to the user's question/message (see
+			// normalizeSearchPlan), so recording it verbatim would leak PII
+			// into exported traces.
+			attribute.Int("parallel.objective_len", len(strings.TrimSpace(objective))),
 			attribute.Int("parallel.queries_count", len(queries)),
 		),
 	)

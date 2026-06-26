@@ -25,11 +25,17 @@ func NewHTTPTransport(base http.RoundTripper) http.RoundTripper {
 	return otelhttp.NewTransport(
 		base,
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+			// otelhttp passes an empty operation string for client spans, so
+			// use the HTTP method explicitly to get names like "GET finnhub.io".
+			method := operation
+			if r != nil && r.Method != "" {
+				method = r.Method
+			}
 			host := ""
-			if r.URL != nil {
+			if r != nil && r.URL != nil {
 				host = r.URL.Host
 			}
-			return fmt.Sprintf("%s %s", operation, host)
+			return fmt.Sprintf("%s %s", method, host)
 		}),
 	)
 }

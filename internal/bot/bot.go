@@ -17,7 +17,6 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -85,7 +84,9 @@ const (
 )
 
 func Run() error {
-	_ = godotenv.Load()
+	// .env is loaded by main() before telemetry setup so OTEL_* config is
+	// honored; godotenv does not override already-set vars, so there is no
+	// need to load it again here.
 
 	// Wire OTel HTTP instrumentation after the caller (main) has run
 	// appotel.Setup, so otelhttp binds metrics to the real meter provider.

@@ -60,8 +60,11 @@ func parseConfig() config {
 	return c
 }
 
-// buildResource assembles the shared resource from env + build info.
-func buildResource(_ context.Context, info BuildInfo) (*resource.Resource, error) {
+// buildResource assembles the shared resource from env + build info. host.name
+// and process.pid come solely from resource.WithHost() and
+// resource.WithProcessPID() (the dedicated detectors) rather than being
+// appended manually here.
+func buildResource(ctx context.Context, info BuildInfo) (*resource.Resource, error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("service.name", serviceName()),
 	}
@@ -71,13 +74,9 @@ func buildResource(_ context.Context, info BuildInfo) (*resource.Resource, error
 	if info.Date != "" {
 		attrs = append(attrs, attribute.String("build.date", info.Date))
 	}
-	if host, err := os.Hostname(); err == nil && host != "" {
-		attrs = append(attrs, attribute.String("host.name", host))
-	}
-	attrs = append(attrs, attribute.Int64("process.pid", int64(os.Getpid())))
 
 	res, err := resource.New(
-		context.Background(),
+		ctx,
 		resource.WithAttributes(attrs...),
 		resource.WithFromEnv(),
 		resource.WithHost(),

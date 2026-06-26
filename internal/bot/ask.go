@@ -631,7 +631,7 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	allowed, retryAfter := allowExplainRequest(update.Message)
 	if !allowed {
 		appotel.RecordOutcome(ctx, "rate_limited")
-		recordRateLimited(ctx, "explain")
+		recordRateLimited(ctx, "photo_explain")
 		var userID int64
 		if update.Message.From != nil {
 			userID = update.Message.From.ID
@@ -705,10 +705,11 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if explainErr != nil {
 		if errors.Is(explainErr, ErrExplainBlocked) {
 			appotel.RecordOutcome(ctx, "blocked")
+			log.Warn().Err(explainErr).Msg("Photo ask question blocked by safety filters")
 		} else {
 			appotel.RecordOutcome(ctx, "error")
+			log.Error().Err(explainErr).Msg("Failed to answer photo ask question")
 		}
-		log.Error().Err(explainErr).Msg("Failed to answer photo ask question")
 		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explainErrorToUserText(explainErr))
 		return
 	}

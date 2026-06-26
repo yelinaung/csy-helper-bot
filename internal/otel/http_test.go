@@ -7,16 +7,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-func TestNewHTTPTransport_NoDoubleWrap(t *testing.T) {
+func TestNewHTTPTransport_WrapsBase(t *testing.T) {
 	t.Parallel()
 
-	base := http.DefaultTransport
-	wrapped := NewHTTPTransport(base)
-	// Wrapping the already-wrapped transport is a passthrough config; the key
-	// property tested here is that NewHTTPTransport returns a non-nil
-	// RoundTripper and does not panic.
+	// NewHTTPTransport returns a non-nil RoundTripper and does not panic when
+	// handed a concrete base transport.
+	wrapped := NewHTTPTransport(http.DefaultTransport)
 	require.NotNil(t, wrapped)
 }
 
@@ -42,4 +41,35 @@ func TestNewHTTPTransport_PreservesContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	_ = resp.Body.Close()
+}
+
+// TestWrapClientBehavior verifies the integration behavior relied on by the
+// bot: a nil client is a no-op, a real client is wrapped exactly once with an
+// otelhttp.Transport, and a second call does not double-wrap (which would
+// produce duplicate nested spans/metrics).
+func TestWrapClientBehavior(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil client is no-op", func(t *testing.T) {
+		t.Parallel()
+		require.NotPanics(t, func() { WrapClient(nil) })
+	})
+
+	t.Run("wraps client and avoids double wrap", func(t *testing.T) {
+		t.Parallel()
+
+		client := &http.Client{}
+		require.Nil(t, client.Transport, "expected zero-value client.Transport to be nil before wrapping")
+
+		WrapClient(client)
+		require.NotNil(t, client.Transport, "expected client.Transport to be non-nil after wrapping")
+
+		first, ok := client.Transport.(*otelhttp.Transport)
+		require.True(t, ok, "expected client.Transport to be *otelhttp.Transport after first wrap")
+		require.NotNil(t, first)
+
+		// Second wrap must be a no-op: same instance, not re-wrapped.
+		WrapClient(client)
+		require.Same(t, first, client.Transport, "expected WrapClient to skip an already-wrapped client")
+	})
 }

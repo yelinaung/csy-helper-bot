@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+// attrURLFull / attrHTTPURL are the span/log attribute keys whose values may
+// carry a URL with embedded credentials. Exported as constants so the test
+// suite (and the goconst linter) shares one definition.
+const (
+	attrURLFull = "url.full"
+	attrHTTPURL = "http.url"
+)
+
 // urlAttrKeys is the set of span/log attribute keys whose values may carry a
 // URL with embedded credentials. Both names are redacted to stay robust to
 // semconv version drift: newer otelhttp emits url.full, older versions emit
@@ -16,8 +24,8 @@ import (
 // contrib version uses the other name — the worst failure mode for a
 // fail-closed safety net.
 var urlAttrKeys = map[string]struct{}{
-	"url.full": {},
-	"http.url": {},
+	attrURLFull: {},
+	attrHTTPURL: {},
 }
 
 // logURLAttrKeys extends urlAttrKeys with zerolog field names callers may use
@@ -25,8 +33,8 @@ var urlAttrKeys = map[string]struct{}{
 // the common ones).
 var logURLAttrKeys = map[string]struct{}{
 	"url":         {},
-	"url.full":    {},
-	"http.url":    {},
+	attrURLFull:   {},
+	attrHTTPURL:   {},
 	"request.url": {},
 }
 

@@ -188,7 +188,7 @@ func TestZerologBridge_EmptyAndGarbage(t *testing.T) {
 func TestZerologBridge_RedactsURLAttributes(t *testing.T) {
 	t.Parallel()
 
-	tests := []string{"url", "url.full", "http.url", "request.url"}
+	tests := []string{"url", attrURLFull, attrHTTPURL, "request.url"}
 	for _, key := range tests {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()

@@ -25,6 +25,7 @@ A Telegram bot that provides helpful utilities for developers.
   - Bot ignores private chats
   - Bot leaves unauthorized groups automatically
 - Structured logging with human-readable console output (zerolog)
+- Optional OpenTelemetry traces, metrics, and logs export (disabled by default)
 
 ## Setup
 
@@ -67,6 +68,20 @@ A Telegram bot that provides helpful utilities for developers.
    EXPLAIN_RATE_LIMIT_COUNT=5
    EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
    LOG_LEVEL=info
+   # OpenTelemetry (optional — disabled unless OTEL_ENABLED=true)
+   OTEL_ENABLED=true
+   # OTLP/HTTP endpoint (defaults to http://localhost:4318)
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+   # Optional: auth headers for hosted collectors
+   # OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer ...
+   # Optional: override the default service name (csy-helper-bot)
+   # OTEL_SERVICE_NAME=csy-helper-bot
+   # Optional: disable individual signals while keeping others on
+   # OTEL_TRACES_ENABLED=false
+   # OTEL_METRICS_ENABLED=false
+   # OTEL_LOGS_ENABLED=false
+   # Optional: dump to stdout instead of OTLP (local debugging)
+   # OTEL_EXPORTER=stdout
    ```
 7. Run the bot:
    ```bash
@@ -91,6 +106,40 @@ A Telegram bot that provides helpful utilities for developers.
 - Groups must be listed in `ALLOWED_GROUP_IDS`.
 - If a group is not allowlisted, the bot leaves that group.
 
+## Observability (OpenTelemetry)
+
+Telemetry export is **off by default**. Set `OTEL_ENABLED=true` to ship
+traces, metrics, and logs over OTLP/HTTP to a local collector such as
+[HyperDX](https://www.hyperdx.io/) or [Clickstack](https://clickstack.io/),
+both of which ingest on the standard `http://localhost:4318` endpoint.
+
+When enabled:
+
+- **Traces** — one span per registered handler plus child spans for every
+  external call (Finnhub, Databento, LeetCode, Exa, Parallel, Telegram photo
+  download, Gemini). HTTP client spans/metrics come from `otelhttp`.
+- **Metrics** — `bot.commands.total` and `bot.command.duration` (with a
+  `bot.result` dimension of `success`/`error`/`rate_limited`/`unknown`/...),
+  `bot.rate_limited.total`, and `gen_ai.client.token.usage` (a histogram).
+- **Logs** — the existing zerolog output is bridged into the OTel logs
+  pipeline alongside the console output.
+
+### Credential safety
+
+Finnhub puts its API key in the query string and Telegram puts the bot token
+in the photo-download URL path. A sanitizing span exporter strips these
+credentials from `url.full` / `http.url` before any trace leaves the process
+(redacting `token`/`api_key`/`apikey`/`key` query params and `bot<TOKEN>`
+path segments, fail-closed on unparseable URLs). The log bridge applies the
+same redaction to `url`-bearing log attributes.
+
+### Local debugging
+
+Set `OTEL_EXPORTER=stdout` to print telemetry to stdout instead of exporting
+it (no collector needed). Individual signals can be turned off with
+`OTEL_TRACES_ENABLED=false`, `OTEL_METRICS_ENABLED=false`, or
+`OTEL_LOGS_ENABLED=false` while keeping the others on.
+
 ## Deployment
 
 ### Docker
@@ -110,6 +159,8 @@ docker run \
   -e STOCK_ANALYSIS_MODEL=gemini-3.5-flash \
   -e ALLOWED_GROUP_IDS=-1001234567890 \
   -e LOG_LEVEL=info \
+  -e OTEL_ENABLED=true \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
   csy-helper-bot
 ```
 
@@ -132,6 +183,9 @@ dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
 dokku config:set csy-helper-bot LOG_LEVEL=info
+# Optional: enable OpenTelemetry export
+dokku config:set csy-helper-bot OTEL_ENABLED=true
+dokku config:set csy-helper-bot OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 
 # On your local machine
 git remote add dokku dokku@your-server:csy-helper-bot

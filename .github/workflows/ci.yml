@@ -152,3 +152,25 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  otel-cicd-action:
+    if: always()
+    name: OpenTelemetry Export Trace
+    runs-on: [self-hosted, Linux, X64, playground-ubuntu]
+    permissions:
+      contents: read
+      actions: read
+    needs:
+      [
+        secret-detection,
+        semgrep-sast,
+        lint,
+        test
+      ]
+    steps:
+      - name: Export workflow
+        uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4
+        with:
+          otlpEndpoint: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}/v1/traces
+          otlpHeaders: ${{ secrets.OTEL_EXPORTER_HEADERS }}
+          githubToken: ${{ secrets.GITHUB_TOKEN }}

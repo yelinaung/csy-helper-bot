@@ -73,6 +73,7 @@ type CompanyProfile struct {
 	MarketCapitalization float64 `json:"marketCapitalization"` //nolint:tagliatelle // Finnhub response uses camelCase.
 	Industry             string  `json:"finnhubIndustry"`      //nolint:tagliatelle // Finnhub response uses camelCase.
 	Exchange             string  `json:"exchange"`
+	Currency             string  `json:"currency"`
 }
 
 type HistoricalBar struct {
@@ -464,28 +465,59 @@ func formatStockMessage(symbol string, quote *StockQuote, profile *CompanyProfil
 	name := symbol
 	var marketCapStr string
 	var industryStr string
+	var exchangeCurrencyStr string
 
-	if profile != nil && profile.Name != "" {
-		name = profile.Name
+	if profile != nil {
+		if profile.Name != "" {
+			name = profile.Name
+		}
 		if profile.MarketCapitalization > 0 {
 			marketCapStr = fmt.Sprintf("\n🏢 Market Cap: $%.2fB", profile.MarketCapitalization/1000)
 		}
 		if profile.Industry != "" {
 			industryStr = "\n🏭 Industry: " + profile.Industry
 		}
+		exchangeCurrencyStr = formatExchangeCurrencyLine(profile)
 	}
 
-	return fmt.Sprintf(`%s (%s) %s
+	return fmt.Sprintf(`%s (%s) %s%s
 💵 Current: $%.2f
 📈 Change: %.2f (%.2f%%)
 📊 Open: $%.2f | High: $%.2f | Low: $%.2f
 📉 Previous Close: $%.2f%s%s`,
 		name, symbol, changeEmoji,
+		exchangeCurrencyStr,
 		quote.CurrentPrice,
 		quote.Change, quote.PercentChange,
 		quote.Open, quote.High, quote.Low,
 		quote.PreviousClose,
 		marketCapStr, industryStr)
+}
+
+// formatExchangeCurrencyLine renders the exchange and reporting-currency line
+// shown below the title. The profile currency is labeled as "Reporting
+// Currency" because Finnhub's /stock/profile2 returns the company's
+// financial-reporting currency, which may differ from the trading currency
+// of the quote (e.g. SHECY is an OTC ADR priced in USD but reports in JPY).
+// Prices in the message remain prefixed with "$" since Finnhub /quote
+// returns values in the symbol's trading currency. Returns "" when both
+// fields are empty so US-listed symbols without profile data stay compact.
+// Precondition: profile must be non-nil; both call sites guard with a
+// profile != nil check before invoking this helper.
+func formatExchangeCurrencyLine(profile *CompanyProfile) string {
+	exchange := strings.TrimSpace(profile.Exchange)
+	currency := strings.TrimSpace(profile.Currency)
+	parts := make([]string, 0, 2)
+	if exchange != "" {
+		parts = append(parts, "🏛 Exchange: "+exchange)
+	}
+	if currency != "" {
+		parts = append(parts, "💱 Reporting Currency: "+currency)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(parts, " · ")
 }
 
 // fetchHistoricalBars requests Databento daily OHLCV bars and normalizes them
@@ -696,6 +728,7 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar, prof
 	title := symbol
 	marketCapStr := ""
 	industryStr := ""
+	exchangeCurrencyStr := ""
 	if profile != nil {
 		if profile.Name != "" {
 			title = profile.Name + " (" + symbol + ")"
@@ -706,14 +739,16 @@ func formatHistoricalSummary(symbol string, days int, bars []HistoricalBar, prof
 		if profile.Industry != "" {
 			industryStr = "\n🏭 Industry: " + profile.Industry
 		}
+		exchangeCurrencyStr = formatExchangeCurrencyLine(profile)
 	}
 
 	return fmt.Sprintf(
-		"%s %dd (%s to %s)\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f%s%s",
+		"%s %dd (%s to %s)%s\nClose: $%.2f\nReturn: %.2f%%\nRange: $%.2f - $%.2f%s%s",
 		title,
 		days,
 		first.Date.Format(dateFormatPattern),
 		last.Date.Format(dateFormatPattern),
+		exchangeCurrencyStr,
 		last.Close,
 		change,
 		low,

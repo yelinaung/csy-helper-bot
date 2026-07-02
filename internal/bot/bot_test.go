@@ -351,6 +351,146 @@ func TestFormatStockMessage_ContainsAllFields(t *testing.T) {
 	}
 }
 
+func TestFormatStockMessage_ExchangeCurrency(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  21.67,
+		Change:        0.09,
+		PercentChange: 0.42,
+		High:          22.43,
+		Low:           21.55,
+		Open:          22.43,
+		PreviousClose: 21.58,
+	}
+	profile := &CompanyProfile{
+		Name:                 "Shin-Etsu Chemical Co Ltd",
+		MarketCapitalization: 13700068,
+		Industry:             "Chemicals",
+		Exchange:             "OTC Markets",
+		Currency:             "JPY",
+	}
+
+	msg := formatStockMessage("SHECY", quote, profile)
+
+	if !strings.Contains(msg, "🏛 Exchange: OTC Markets") {
+		t.Errorf("expected exchange line in message, got %q", msg)
+	}
+	if !strings.Contains(msg, "💱 Reporting Currency: JPY") {
+		t.Errorf("expected currency line in message, got %q", msg)
+	}
+	// Exchange/currency line should sit directly below the title line.
+	if !strings.Contains(msg, "Shin-Etsu Chemical Co Ltd (SHECY) 🟢\n🏛 Exchange: OTC Markets") {
+		t.Errorf("expected exchange line directly under title, got %q", msg)
+	}
+}
+
+func TestFormatStockMessage_USProfileStillCompacts(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  150.25,
+		Change:        2.50,
+		PercentChange: 1.69,
+		High:          151.00,
+		Low:           148.50,
+		Open:          149.00,
+		PreviousClose: 147.75,
+	}
+	// US profile with no exchange/currency returned by Finnhub.
+	profile := &CompanyProfile{
+		Name:                 testProfileName,
+		MarketCapitalization: 3000000,
+		Industry:             testIndustryTechnology,
+	}
+
+	msg := formatStockMessage(testSymbolAAPL, quote, profile)
+
+	if strings.Contains(msg, "Exchange:") {
+		t.Errorf("US profile with empty exchange should not render exchange line, got %q", msg)
+	}
+	if strings.Contains(msg, "Currency:") {
+		t.Errorf("US profile with empty currency should not render currency line, got %q", msg)
+	}
+}
+
+// TestFormatStockMessage_ADRReportingCurrencyDoesNotClashWithPrice verifies
+// that for an ADR like SHECY (trades in USD on OTC but reports financials
+// in JPY), the price stays prefixed with "$" while the profile currency is
+// labeled "Reporting Currency" — so the output never reads as contradictory
+// ("Currency: JPY" next to "$21.67").
+func TestFormatStockMessage_ADRReportingCurrencyDoesNotClashWithPrice(t *testing.T) {
+	quote := &StockQuote{
+		CurrentPrice:  21.67,
+		Change:        0.09,
+		PercentChange: 0.42,
+		High:          22.43,
+		Low:           21.55,
+		Open:          22.43,
+		PreviousClose: 21.58,
+	}
+	profile := &CompanyProfile{
+		Name:                 "Shin-Etsu Chemical Co Ltd",
+		MarketCapitalization: 13700068,
+		Industry:             "Chemicals",
+		Exchange:             "OTC Markets",
+		Currency:             "JPY",
+	}
+
+	msg := formatStockMessage("SHECY", quote, profile)
+
+	if !strings.Contains(msg, "💵 Current: $21.67") {
+		t.Errorf("price must stay USD-denominated for ADR, got %q", msg)
+	}
+	if !strings.Contains(msg, "Reporting Currency: JPY") {
+		t.Errorf("currency must be labeled as reporting currency, got %q", msg)
+	}
+	// The raw, unlabeled "Currency: JPY" must NOT appear — that wording
+	// implies the prices are in JPY, which is the contradiction we fixed.
+	if strings.Contains(msg, "💱 Currency: JPY") {
+		t.Errorf("unlabeled 'Currency:' wording must not appear, got %q", msg)
+	}
+}
+
+func TestFormatExchangeCurrencyLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile *CompanyProfile
+		want    string
+	}{
+		{
+			name:    "both exchange and currency joined with separator",
+			profile: &CompanyProfile{Exchange: "Tokyo Stock Exchange", Currency: "JPY"},
+			want:    "\n🏛 Exchange: Tokyo Stock Exchange · 💱 Reporting Currency: JPY",
+		},
+		{
+			name:    "exchange only",
+			profile: &CompanyProfile{Exchange: "NASDAQ"},
+			want:    "\n🏛 Exchange: NASDAQ",
+		},
+		{
+			name:    "currency only",
+			profile: &CompanyProfile{Currency: "EUR"},
+			want:    "\n💱 Reporting Currency: EUR",
+		},
+		{
+			name:    "both empty returns empty string",
+			profile: &CompanyProfile{},
+			want:    "",
+		},
+		{
+			name:    "whitespace-only fields treated as empty",
+			profile: &CompanyProfile{Exchange: "   ", Currency: ""},
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatExchangeCurrencyLine(tt.profile)
+			if got != tt.want {
+				t.Errorf("formatExchangeCurrencyLine() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFetchStockQuote(t *testing.T) {
 	mockQuote := StockQuote{
 		CurrentPrice:  150.25,
@@ -615,6 +755,31 @@ func TestFormatHistoricalSummary_WithProfile(t *testing.T) {
 	}
 	if !strings.Contains(got, "🏭 Industry: Technology") {
 		t.Fatalf("expected industry in summary, got %q", got)
+	}
+}
+
+func TestFormatHistoricalSummary_ExchangeCurrency(t *testing.T) {
+	bars := []HistoricalBar{
+		{Date: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), Close: 100, High: 102, Low: 99},
+		{Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Close: 110, High: 111, Low: 98},
+	}
+	profile := &CompanyProfile{
+		Name:     "Shin-Etsu Chemical Co Ltd",
+		Exchange: "OTC Markets",
+		Currency: "JPY",
+	}
+
+	got := formatHistoricalSummary("SHECY", 7, bars, profile)
+
+	if !strings.Contains(got, "🏛 Exchange: OTC Markets") {
+		t.Fatalf("expected exchange line in historical summary, got %q", got)
+	}
+	if !strings.Contains(got, "💱 Reporting Currency: JPY") {
+		t.Fatalf("expected currency line in historical summary, got %q", got)
+	}
+	// Exchange/currency should sit between the date range and Close line.
+	if !strings.Contains(got, ")\n🏛 Exchange: OTC Markets") {
+		t.Fatalf("expected exchange line directly under date range, got %q", got)
 	}
 }
 

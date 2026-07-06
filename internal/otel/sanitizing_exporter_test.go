@@ -2,6 +2,7 @@ package otel
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -173,6 +174,54 @@ func exportAndCollectEvents(t *testing.T) []tracetest.SpanStub {
 
 	require.NoError(tp.ForceFlush(context.Background()))
 	return mem.GetSpans()
+}
+
+func TestSanitizer_RedactsStatusDescription(t *testing.T) {
+	t.Parallel()
+
+	mem := tracetest.NewInMemoryExporter()
+	sanitized := newSanitizingExporter(mem)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(sanitized))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test.span")
+	span.SetStatus(codes.Error, `Get "https://finnhub.io/api/v1/quote?token=secret": dial tcp`)
+	span.End()
+
+	require.NoError(t, tp.ForceFlush(context.Background()))
+	stubs := mem.GetSpans()
+	require.Len(t, stubs, 1)
+	require.Contains(t, stubs[0].Status.Description, "token=<redacted>")
+	require.NotContains(t, stubs[0].Status.Description, "secret")
+}
+
+func TestSanitizer_RedactsExceptionMessageEvent(t *testing.T) {
+	t.Parallel()
+
+	mem := tracetest.NewInMemoryExporter()
+	sanitized := newSanitizingExporter(mem)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(sanitized))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test.span")
+	span.RecordError(errors.New(`Get "https://api.telegram.org/file/bot123456:ABC-DEF_ghi/file.jpg": EOF`))
+	span.End()
+
+	require.NoError(t, tp.ForceFlush(context.Background()))
+	stubs := mem.GetSpans()
+	require.Len(t, stubs, 1)
+	require.NotEmpty(t, stubs[0].Events)
+	found := false
+	for _, kv := range stubs[0].Events[0].Attributes {
+		if string(kv.Key) == "exception.message" {
+			found = true
+			require.Contains(t, kv.Value.AsString(), "bot<redacted>")
+			require.NotContains(t, kv.Value.AsString(), "123456:ABC-DEF_ghi")
+		}
+	}
+	require.True(t, found, "exception.message attribute not exported")
 }
 
 func TestSanitizer_RedactsEventAndLinkAttributes(t *testing.T) {

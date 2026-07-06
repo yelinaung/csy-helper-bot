@@ -129,13 +129,32 @@ func parseZerologTime(v any) (time.Time, bool) {
 	return t, true
 }
 
+func logValueString(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case json.Number:
+		return val.String()
+	case nil:
+		return ""
+	default:
+		raw, err := json.Marshal(val)
+		if err != nil {
+			return ""
+		}
+		return string(raw)
+	}
+}
+
 // toLogAttribute best-effort types a zerolog field value into an OTel log
 // KeyValue. URL-bearing keys are redacted via the shared redactURL helper.
 func toLogAttribute(k string, v any) otellog.KeyValue {
-	if _, isURLKey := logURLAttrKeys[strings.ToLower(k)]; isURLKey {
-		if s, ok := v.(string); ok {
-			return otellog.String(k, redactURL(s))
-		}
+	lowerKey := strings.ToLower(k)
+	if _, isURLKey := logURLAttrKeys[lowerKey]; isURLKey {
+		return otellog.String(k, redactURL(logValueString(v)))
+	}
+	if _, isSensitiveTextKey := logSensitiveTextAttrKeys[lowerKey]; isSensitiveTextKey {
+		return otellog.String(k, RedactSensitiveText(logValueString(v)))
 	}
 
 	switch val := v.(type) {

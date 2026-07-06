@@ -33,6 +33,7 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(level)
 	zerolog.TimeFieldFormat = time.RFC3339
+	zerolog.ErrorMarshalFunc = appotel.SanitizeErrorValue //nolint:reassign // Redact credential-bearing URLs from all zerolog Err fields.
 
 	ctx := context.Background()
 

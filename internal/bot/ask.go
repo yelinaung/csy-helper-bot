@@ -579,7 +579,7 @@ func downloadTelegramPhoto(ctx context.Context, b *bot.Bot, fileID string) (imag
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("download photo: %w", err)
+		return nil, "", fmt.Errorf("download photo: %w", sanitizeHTTPClientError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 

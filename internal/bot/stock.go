@@ -386,7 +386,7 @@ func fetchStockQuote(ctx context.Context, symbol string) (quote *StockQuote, err
 	// URL is built from the trusted finnhubBaseURL constant.
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -440,7 +440,7 @@ func fetchCompanyProfile(ctx context.Context, symbol string) (profile *CompanyPr
 	// URL is built from the trusted finnhubBaseURL constant.
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

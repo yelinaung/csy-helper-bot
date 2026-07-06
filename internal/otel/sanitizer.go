@@ -4,6 +4,7 @@
 package otel
 
 import (
+	"errors"
 	"net/url"
 	"regexp"
 	"strings"
@@ -38,15 +39,32 @@ var logURLAttrKeys = map[string]struct{}{
 	"request.url": {},
 }
 
+// logSensitiveTextAttrKeys are zerolog fields whose values may contain
+// transport errors with credential-bearing URLs embedded in the message.
+var logSensitiveTextAttrKeys = map[string]struct{}{
+	"error": {},
+	"err":   {},
+}
+
+// spanSensitiveTextAttrKeys are span event attributes whose values may contain
+// transport errors with credential-bearing URLs embedded in the message.
+var spanSensitiveTextAttrKeys = map[string]struct{}{
+	"exception.message": {},
+}
+
 // secretQueryValueRE matches a secret query parameter (token/api_key/apikey/
-// key) and its value. The leading boundary (^|&|?) prevents a suffix like
-// "key" from matching inside another key such as "monkey". The value run stops
-// at the next param boundary (&, #) or end of string.
-var secretQueryValueRE = regexp.MustCompile(`(?i)(^|[&?])(token|api_key|apikey|key)=([^&#]*)`)
+// key) and its value. The leading boundary (^, &, ?, or #) prevents
+// suffixes like "key" from matching inside another key such as "monkey".
+// The value run stops at the next param boundary (&, #) or end of string.
+var secretQueryValueRE = regexp.MustCompile(`(?i)(^|[&?#])(token|api_key|apikey|key)=([^&#]*)`)
 
 // telegramBotTokenPathRE matches the bot<TOKEN> path segment produced by the
 // Telegram file download API (e.g. https://api.telegram.org/file/bot123:abc/...).
 var telegramBotTokenPathRE = regexp.MustCompile(`bot\d+:[A-Za-z0-9_-]+`)
+
+// sensitiveURLRE matches URL substrings inside larger messages such as
+// net/url.Error strings: `Get "https://...token=secret": dial tcp ...`.
+var sensitiveURLRE = regexp.MustCompile(`(?i)https?://[^\s"'<>()]+`)
 
 const redactedPlaceholder = "<redacted>"
 
@@ -74,7 +92,7 @@ func redactURL(raw string) string {
 			}
 			key := strings.ToLower(match[:eq])
 			// Strip the leading boundary char to isolate the key name.
-			key = strings.TrimLeft(key, "&?")
+			key = strings.TrimLeft(key, "&?#")
 			if _, ok := secretQueryParamKeys[key]; !ok {
 				return match
 			}
@@ -88,6 +106,57 @@ func redactURL(raw string) string {
 	}
 
 	return result
+}
+
+// RedactSensitiveText strips URL-embedded credentials from arbitrary text.
+func RedactSensitiveText(text string) string {
+	if text == "" {
+		return text
+	}
+	return sensitiveURLRE.ReplaceAllStringFunc(text, redactURL)
+}
+
+// SanitizeError returns an error whose Error string has URL-embedded
+// credentials redacted. The returned error unwraps to the original error so
+// callers can still use errors.Is and errors.As.
+func SanitizeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := RedactSensitiveText(err.Error())
+	if msg == err.Error() {
+		return err
+	}
+	return sanitizedError{err: err, msg: msg}
+}
+
+// SanitizeErrorValue is suitable for zerolog.ErrorMarshalFunc.
+func SanitizeErrorValue(err error) any {
+	if err == nil {
+		return nil
+	}
+	return SanitizeError(err).Error()
+}
+
+type sanitizedError struct {
+	err error
+	msg string
+}
+
+func (e sanitizedError) Error() string {
+	return e.msg
+}
+
+func (e sanitizedError) Unwrap() error {
+	return e.err
+}
+
+func (e sanitizedError) Is(target error) bool {
+	return errors.Is(e.err, target)
+}
+
+func (e sanitizedError) As(target any) bool {
+	return errors.As(e.err, target)
 }
 
 // secretQueryParamKeys are query parameter names (lowercase) whose values are

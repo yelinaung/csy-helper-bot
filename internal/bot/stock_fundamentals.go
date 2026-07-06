@@ -137,7 +137,7 @@ func fetchFinancialMetrics(ctx context.Context, symbol string) (metrics *Financi
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -189,7 +189,7 @@ func fetchEarningsHistory(ctx context.Context, symbol string) (entries []Earning
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -241,7 +241,7 @@ func fetchRecommendation(ctx context.Context, symbol string) (trend *Recommendat
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -297,7 +297,7 @@ func fetchPriceTarget(ctx context.Context, symbol string) (target *PriceTarget, 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHTTPClientError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

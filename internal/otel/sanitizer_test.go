@@ -1,6 +1,9 @@
 package otel
 
 import (
+	"errors"
+	"fmt"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,6 +53,16 @@ func TestRedactURL_OtherSecretQueryKeys(t *testing.T) {
 	}
 }
 
+func TestRedactURL_FragmentSecretQueryKey(t *testing.T) {
+	t.Parallel()
+
+	in := "https://example.com/path?symbol=AAPL#token=fragment-secret"
+	got := redactURL(in)
+
+	require.Contains(t, got, "#token=<redacted>")
+	require.NotContains(t, got, "fragment-secret")
+}
+
 func TestRedactURL_NoSecretUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -73,4 +86,44 @@ func TestRedactURL_Empty(t *testing.T) {
 
 	// Empty string parses fine and has no credentials — returns unchanged.
 	require.Empty(t, redactURL(""))
+}
+
+func TestRedactSensitiveText_RedactsURLsInsideErrorMessages(t *testing.T) {
+	t.Parallel()
+
+	input := `Get "https://finnhub.io/api/v1/quote?symbol=AAPL&token=finnhub-secret": dial tcp: lookup failed; Get "https://api.telegram.org/file/bot123456:ABC-DEF_ghi/photos/file.jpg": EOF`
+	got := RedactSensitiveText(input)
+
+	require.Contains(t, got, "token=<redacted>")
+	require.Contains(t, got, "bot<redacted>")
+	require.NotContains(t, got, "finnhub-secret")
+	require.NotContains(t, got, "123456:ABC-DEF_ghi")
+}
+
+func TestRedactSensitiveText_RedactsUppercaseScheme(t *testing.T) {
+	t.Parallel()
+
+	input := `Get "HTTPS://finnhub.io/api/v1/quote?symbol=AAPL&token=upper-secret": dial tcp`
+	got := RedactSensitiveText(input)
+
+	require.Contains(t, got, "token=<redacted>")
+	require.NotContains(t, got, "upper-secret")
+}
+
+func TestSanitizeError_RedactsAndPreservesUnwrap(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("network failed")
+	urlErr := &url.Error{
+		Op:  "Get",
+		URL: "https://finnhub.io/api/v1/quote?symbol=AAPL&token=finnhub-secret",
+		Err: sentinel,
+	}
+	err := fmt.Errorf("fetch stock quote: %w", urlErr)
+
+	safeErr := SanitizeError(err)
+
+	require.ErrorIs(t, safeErr, sentinel)
+	require.NotContains(t, safeErr.Error(), "finnhub-secret")
+	require.Contains(t, safeErr.Error(), "token=<redacted>")
 }

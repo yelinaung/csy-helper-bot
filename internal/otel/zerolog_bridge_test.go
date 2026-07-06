@@ -185,6 +185,34 @@ func TestZerologBridge_EmptyAndGarbage(t *testing.T) {
 	require.Empty(t, exp.snapshot())
 }
 
+func TestZerologBridge_RedactsErrorAttribute(t *testing.T) {
+	t.Parallel()
+
+	exp, w := newBridgeWithCapture(t)
+	line := `{"level":"error","message":"fetch failed","error":"Get \"https://finnhub.io/api/v1/quote?token=secret\": dial tcp"}` + "\n"
+	_, _ = w.Write([]byte(line))
+
+	records := exp.snapshot()
+	require.Len(t, records, 1)
+	attrs := attributeMap(&records[0])
+	require.Contains(t, attrs["error"], "token=<redacted>")
+	require.NotContains(t, attrs["error"], "secret")
+}
+
+func TestZerologBridge_RedactsNonStringErrorAttribute(t *testing.T) {
+	t.Parallel()
+
+	exp, w := newBridgeWithCapture(t)
+	line := `{"level":"error","message":"fetch failed","error":{"message":"Get \"HTTPS://finnhub.io/api/v1/quote?token=secret\": dial tcp"}}` + "\n"
+	_, _ = w.Write([]byte(line))
+
+	records := exp.snapshot()
+	require.Len(t, records, 1)
+	attrs := attributeMap(&records[0])
+	require.Contains(t, attrs["error"], "token=<redacted>")
+	require.NotContains(t, attrs["error"], "secret")
+}
+
 func TestZerologBridge_RedactsURLAttributes(t *testing.T) {
 	t.Parallel()
 

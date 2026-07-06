@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,8 @@ import (
 
 	dbn_hist "github.com/NimbleMarkets/dbn-go/hist"
 	"github.com/go-telegram/bot/models"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 const (
@@ -75,6 +78,68 @@ func useRedirectedHTTPClient(t *testing.T, serverURL string) {
 	t.Cleanup(func() {
 		httpClient = orig
 	})
+}
+
+func TestRecordSpanError_PreservesExceptionTypeAndRedactsStatus(t *testing.T) {
+	mem := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(mem))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test.span")
+	err := &url.Error{
+		Op:  "Get",
+		URL: "HTTPS://finnhub.io/api/v1/quote?symbol=AAPL&token=finnhub-secret",
+		Err: errors.New("dial tcp failed"),
+	}
+	recordSpanError(span, err)
+	span.End()
+
+	if flushErr := tp.ForceFlush(context.Background()); flushErr != nil {
+		t.Fatalf("ForceFlush failed: %v", flushErr)
+	}
+	stubs := mem.GetSpans()
+	if len(stubs) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(stubs))
+	}
+	if strings.Contains(stubs[0].Status.Description, "finnhub-secret") {
+		t.Fatalf("status leaked secret: %q", stubs[0].Status.Description)
+	}
+	if !strings.Contains(stubs[0].Status.Description, "token=<redacted>") {
+		t.Fatalf("status was not redacted: %q", stubs[0].Status.Description)
+	}
+
+	var exceptionType string
+	for _, event := range stubs[0].Events {
+		for _, attr := range event.Attributes {
+			if string(attr.Key) == "exception.type" {
+				exceptionType = attr.Value.AsString()
+			}
+		}
+	}
+	if exceptionType != "*url.Error" {
+		t.Fatalf("exception.type = %q, want *url.Error", exceptionType)
+	}
+}
+
+func TestSanitizeHTTPClientError_RedactsURLAndPreservesType(t *testing.T) {
+	err := &url.Error{
+		Op:  "Get",
+		URL: "HTTPS://finnhub.io/api/v1/quote?symbol=AAPL&token=finnhub-secret",
+		Err: errors.New("dial tcp failed"),
+	}
+
+	safeErr := sanitizeHTTPClientError(err)
+	var urlErr *url.Error
+	if !errors.As(safeErr, &urlErr) {
+		t.Fatalf("expected *url.Error, got %T", safeErr)
+	}
+	if strings.Contains(urlErr.URL, "finnhub-secret") {
+		t.Fatalf("URL leaked secret: %q", urlErr.URL)
+	}
+	if !strings.Contains(urlErr.URL, "token=<redacted>") {
+		t.Fatalf("URL was not redacted: %q", urlErr.URL)
+	}
 }
 
 func TestFetchDailyLeetCode(t *testing.T) {

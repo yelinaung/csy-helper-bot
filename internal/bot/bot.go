@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -90,7 +91,23 @@ func recordSpanError(span trace.Span, err error) {
 		return
 	}
 	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
+	span.SetStatus(codes.Error, appotel.RedactSensitiveText(err.Error()))
+}
+
+func sanitizeHTTPClientError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		safeURL := appotel.RedactSensitiveText(urlErr.URL)
+		if safeURL != urlErr.URL {
+			safeErr := *urlErr
+			safeErr.URL = safeURL
+			return &safeErr
+		}
+	}
+	return appotel.SanitizeError(err)
 }
 
 // recordRateLimited increments the bot.rate_limited.total counter for the

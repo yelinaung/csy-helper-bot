@@ -90,22 +90,29 @@ func (s sanitizeReadOnlySpan) Links() []trace.Link {
 	return out
 }
 
+// Status returns the span status with credentials stripped from the description.
+func (s sanitizeReadOnlySpan) Status() trace.Status {
+	status := s.ReadOnlySpan.Status()
+	status.Description = RedactSensitiveText(status.Description)
+	return status
+}
+
 // redactURLAttrs returns a copy of attrs with credentials stripped from any
-// URL-bearing attribute key. The original slice is returned unchanged when it
-// is empty or contains no redactable values, so the common case (spans with
-// no URL attributes) allocates nothing.
+// URL-bearing attribute key or sensitive error-message attribute. The original
+// slice is returned unchanged when it is empty or contains no redactable values.
 func redactURLAttrs(attrs []attribute.KeyValue) []attribute.KeyValue {
 	if len(attrs) == 0 {
 		return attrs
 	}
 	var out []attribute.KeyValue
 	for i, kv := range attrs {
-		if _, ok := urlAttrKeys[string(kv.Key)]; ok && kv.Value.Type() == attribute.STRING {
+		redacted, ok := redactAttributeString(kv)
+		if ok {
 			if out == nil {
 				out = make([]attribute.KeyValue, len(attrs))
 				copy(out, attrs[:i])
 			}
-			out[i] = attribute.String(string(kv.Key), redactURL(kv.Value.AsString()))
+			out[i] = attribute.String(string(kv.Key), redacted)
 			continue
 		}
 		if out != nil {
@@ -116,4 +123,18 @@ func redactURLAttrs(attrs []attribute.KeyValue) []attribute.KeyValue {
 		return attrs
 	}
 	return out
+}
+
+func redactAttributeString(kv attribute.KeyValue) (string, bool) {
+	if kv.Value.Type() != attribute.STRING {
+		return "", false
+	}
+	key := string(kv.Key)
+	if _, ok := urlAttrKeys[key]; ok {
+		return redactURL(kv.Value.AsString()), true
+	}
+	if _, ok := spanSensitiveTextAttrKeys[key]; ok {
+		return RedactSensitiveText(kv.Value.AsString()), true
+	}
+	return "", false
 }

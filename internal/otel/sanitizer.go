@@ -66,7 +66,10 @@ var telegramBotTokenPathRE = regexp.MustCompile(`bot\d+:[A-Za-z0-9_-]+`)
 // net/url.Error strings: `Get "https://...token=secret": dial tcp ...`.
 var sensitiveURLRE = regexp.MustCompile(`(?i)https?://[^\s"'<>()]+`)
 
-const redactedPlaceholder = "<redacted>"
+const (
+	redactedPlaceholder             = "<redacted>"
+	sensitiveURLTrailingPunctuation = ",;:."
+)
 
 // redactURL strips credentials from a URL string. It redacts secret query
 // parameters (token/api_key/apikey/key) and Telegram bot-token path segments
@@ -113,7 +116,10 @@ func RedactSensitiveText(text string) string {
 	if text == "" {
 		return text
 	}
-	return sensitiveURLRE.ReplaceAllStringFunc(text, redactURL)
+	return sensitiveURLRE.ReplaceAllStringFunc(text, func(match string) string {
+		trimmed := strings.TrimRight(match, sensitiveURLTrailingPunctuation)
+		return redactURL(trimmed) + match[len(trimmed):]
+	})
 }
 
 // SanitizeError returns an error whose Error string has URL-embedded

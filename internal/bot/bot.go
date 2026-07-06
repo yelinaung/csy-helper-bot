@@ -101,13 +101,24 @@ func sanitizeHTTPClientError(err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		safeURL := appotel.RedactSensitiveText(urlErr.URL)
-		if safeURL != urlErr.URL {
+		safeNestedErr := appotel.SanitizeError(urlErr.Err)
+		if safeURL != urlErr.URL || errorMessageChanged(urlErr.Err, safeNestedErr) {
 			safeErr := *urlErr
 			safeErr.URL = safeURL
+			safeErr.Err = safeNestedErr
 			return &safeErr
 		}
 	}
 	return appotel.SanitizeError(err)
+}
+
+func errorMessageChanged(original error, sanitized error) bool {
+	originalNil := original == nil
+	sanitizedNil := sanitized == nil
+	if originalNil || sanitizedNil {
+		return originalNil != sanitizedNil
+	}
+	return original.Error() != sanitized.Error()
 }
 
 // recordRateLimited increments the bot.rate_limited.total counter for the

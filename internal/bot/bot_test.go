@@ -142,6 +142,59 @@ func TestSanitizeHTTPClientError_RedactsURLAndPreservesType(t *testing.T) {
 	}
 }
 
+func TestSanitizeHTTPClientError_NilInputReturnsNil(t *testing.T) {
+	safeErr := sanitizeHTTPClientError(nil)
+	if safeErr != nil {
+		t.Fatalf("expected nil, got %v", safeErr)
+	}
+}
+
+func TestSanitizeHTTPClientError_NonURLErrorPassThrough(t *testing.T) {
+	original := errors.New("some error")
+	safeErr := sanitizeHTTPClientError(original)
+
+	if !errors.Is(safeErr, original) {
+		t.Fatalf("sanitizeHTTPClientError should preserve errors.Is behavior; got %v", safeErr)
+	}
+}
+
+func TestSanitizeHTTPClientError_UnchangedURLReturnsSameError(t *testing.T) {
+	original := &url.Error{
+		Op:  "Get",
+		URL: "https://example.com/quotes",
+		Err: errors.New("dial tcp failed"),
+	}
+
+	safeErr := sanitizeHTTPClientError(original)
+	var got *url.Error
+	if !errors.As(safeErr, &got) {
+		t.Fatalf("expected *url.Error, got %T", safeErr)
+	}
+	if got != original {
+		t.Fatalf("expected original error when URL is unchanged; got %T", safeErr)
+	}
+}
+
+func TestSanitizeHTTPClientError_RedactsNestedError(t *testing.T) {
+	err := &url.Error{
+		Op:  "Get",
+		URL: "https://example.com/quotes",
+		Err: errors.New(`Get "HTTPS://finnhub.io/api/v1/quote?token=nested-secret": dial tcp`),
+	}
+
+	safeErr := sanitizeHTTPClientError(err)
+	var urlErr *url.Error
+	if !errors.As(safeErr, &urlErr) {
+		t.Fatalf("expected *url.Error, got %T", safeErr)
+	}
+	if strings.Contains(urlErr.Err.Error(), "nested-secret") {
+		t.Fatalf("nested error leaked secret: %q", urlErr.Err.Error())
+	}
+	if !strings.Contains(urlErr.Err.Error(), "token=<redacted>") {
+		t.Fatalf("nested error was not redacted: %q", urlErr.Err.Error())
+	}
+}
+
 func TestFetchDailyLeetCode(t *testing.T) {
 	mockResponse := graphQLResponse{}
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Title = "Two Sum"

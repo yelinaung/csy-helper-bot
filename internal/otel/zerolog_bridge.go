@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -140,7 +141,7 @@ func logValueString(v any) string {
 	default:
 		raw, err := json.Marshal(val)
 		if err != nil {
-			return ""
+			return fmt.Sprint(val)
 		}
 		return string(raw)
 	}

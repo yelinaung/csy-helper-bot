@@ -110,6 +110,47 @@ func TestRedactSensitiveText_RedactsUppercaseScheme(t *testing.T) {
 	require.NotContains(t, got, "upper-secret")
 }
 
+func TestRedactSensitiveText_PreservesTrailingPunctuation(t *testing.T) {
+	t.Parallel()
+
+	input := "failed at https://finnhub.io/api/v1/quote?token=secret, retrying."
+	got := RedactSensitiveText(input)
+
+	require.Equal(t, "failed at https://finnhub.io/api/v1/quote?token=<redacted>, retrying.", got)
+}
+
+func TestSanitizeError_Nil(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, SanitizeError(nil))
+}
+
+func TestSanitizeError_NoSensitiveURL(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("oops")
+	got := SanitizeError(err)
+
+	require.Same(t, err, got)
+	require.Equal(t, "oops", got.Error())
+}
+
+func TestSanitizeErrorValue_Nil(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, SanitizeErrorValue(nil))
+}
+
+func TestSanitizeErrorValue_NoSensitiveURL(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("oops")
+	got := SanitizeErrorValue(err)
+
+	require.IsType(t, "", got)
+	require.Equal(t, err.Error(), got)
+}
+
 func TestSanitizeError_RedactsAndPreservesUnwrap(t *testing.T) {
 	t.Parallel()
 

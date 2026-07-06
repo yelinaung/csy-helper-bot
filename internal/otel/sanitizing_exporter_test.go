@@ -224,6 +224,74 @@ func TestSanitizer_RedactsExceptionMessageEvent(t *testing.T) {
 	require.True(t, found, "exception.message attribute not exported")
 }
 
+func TestSanitizer_DoesNotRedactStatusDescriptionWithoutURL(t *testing.T) {
+	t.Parallel()
+
+	mem := tracetest.NewInMemoryExporter()
+	sanitized := newSanitizingExporter(mem)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(sanitized))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test.span.no_url_status")
+	const desc = "temporary failure"
+	span.SetStatus(codes.Error, desc)
+	span.End()
+
+	require.NoError(t, tp.ForceFlush(context.Background()))
+	stubs := mem.GetSpans()
+	require.Len(t, stubs, 1)
+	require.Equal(t, desc, stubs[0].Status.Description)
+}
+
+func TestSanitizer_DoesNotRedactExceptionMessageWithoutURL(t *testing.T) {
+	t.Parallel()
+
+	mem := tracetest.NewInMemoryExporter()
+	sanitized := newSanitizingExporter(mem)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(sanitized))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test.span.no_url_exception")
+	const msg = "temporary failure"
+	span.RecordError(errors.New(msg))
+	span.End()
+
+	require.NoError(t, tp.ForceFlush(context.Background()))
+	stubs := mem.GetSpans()
+	require.Len(t, stubs, 1)
+	require.NotEmpty(t, stubs[0].Events)
+
+	found := false
+	for _, kv := range stubs[0].Events[0].Attributes {
+		if string(kv.Key) == "exception.message" {
+			found = true
+			require.Equal(t, msg, kv.Value.AsString())
+		}
+	}
+	require.True(t, found, "exception.message attribute not exported")
+}
+
+func TestRedactAttributeString_UrlKeyNonStringValueUnchanged(t *testing.T) {
+	t.Parallel()
+
+	redacted, ok := redactAttributeString(attribute.Int(attrURLFull, 42))
+
+	require.False(t, ok)
+	require.Empty(t, redacted)
+}
+
+func TestRedactAttributeString_SensitiveKeySafeStringUnchanged(t *testing.T) {
+	t.Parallel()
+
+	const msg = "plain text without URLs or tokens"
+	redacted, ok := redactAttributeString(attribute.String("exception.message", msg))
+
+	require.True(t, ok)
+	require.Equal(t, msg, redacted)
+}
+
 func TestSanitizer_RedactsEventAndLinkAttributes(t *testing.T) {
 	t.Parallel()
 

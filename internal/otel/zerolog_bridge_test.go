@@ -199,6 +199,39 @@ func TestZerologBridge_RedactsErrorAttribute(t *testing.T) {
 	require.NotContains(t, attrs["error"], "secret")
 }
 
+func TestZerologBridge_RedactsErrAttribute(t *testing.T) {
+	t.Parallel()
+
+	exp, w := newBridgeWithCapture(t)
+	line := `{"level":"error","message":"fetch failed","err":"Get \"https://finnhub.io/api/v1/quote?token=secret\": dial tcp"}` + "\n"
+	_, _ = w.Write([]byte(line))
+
+	records := exp.snapshot()
+	require.Len(t, records, 1)
+	attrs := attributeMap(&records[0])
+	require.Contains(t, attrs["err"], "token=<redacted>")
+	require.NotContains(t, attrs["err"], "secret")
+}
+
+func TestZerologBridge_DoesNotRedactNonSensitiveErrorMessages(t *testing.T) {
+	t.Parallel()
+
+	exp, w := newBridgeWithCapture(t)
+	lineError := `{"level":"error","message":"fetch failed","error":"simple failure"}` + "\n"
+	lineErr := `{"level":"error","message":"fetch failed","err":"simple failure"}` + "\n"
+	_, _ = w.Write([]byte(lineError))
+	_, _ = w.Write([]byte(lineErr))
+
+	records := exp.snapshot()
+	require.Len(t, records, 2)
+
+	attrs0 := attributeMap(&records[0])
+	require.Equal(t, "simple failure", attrs0["error"])
+
+	attrs1 := attributeMap(&records[1])
+	require.Equal(t, "simple failure", attrs1["err"])
+}
+
 func TestZerologBridge_RedactsNonStringErrorAttribute(t *testing.T) {
 	t.Parallel()
 
@@ -211,6 +244,15 @@ func TestZerologBridge_RedactsNonStringErrorAttribute(t *testing.T) {
 	attrs := attributeMap(&records[0])
 	require.Contains(t, attrs["error"], "token=<redacted>")
 	require.NotContains(t, attrs["error"], "secret")
+}
+
+func TestLogValueString_FallsBackWhenJSONMarshalFails(t *testing.T) {
+	t.Parallel()
+
+	got := logValueString(map[string]any{"bad": func() {}})
+
+	require.NotEmpty(t, got)
+	require.NotEqual(t, "{}", got)
 }
 
 func TestZerologBridge_RedactsURLAttributes(t *testing.T) {

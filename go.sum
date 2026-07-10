@@ -249,5 +249,7 @@ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 hegel.dev/go/hegel v0.6.4 h1:paD/a751ny9LPo8WefXN3VkDBUSp930RCjulJXGEwCM=
 hegel.dev/go/hegel v0.6.4/go.mod h1:VfhziQk0js3ZrMa2PPUd5foLpHoArWqrIYl6VMPzBbg=
+hegel.dev/go/hegel v0.6.6 h1:OH9QBho3JGVX/0GghsH0JyNKkBMuIdw0ze5CzcBQIcE=
+hegel.dev/go/hegel v0.6.6/go.mod h1:ZXWs2/2OdIEjaruLHU5FXmzngVljLUfvSI+WyWSBlJE=
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190523083050-ea95bdfd59fc/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=

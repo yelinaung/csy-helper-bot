@@ -773,7 +773,7 @@ func renderHistoricalChartPNG(symbol string, days int, bars []HistoricalBar) ([]
 		charts.LegendLabelsOptionFunc([]string{symbol}),
 		charts.XAxisLabelsOptionFunc(labels),
 		func(opt *charts.ChartOption) {
-			opt.Symbol = charts.SymbolCircle
+			opt.Symbol.Shape = charts.SymbolCircle
 			opt.LineStrokeWidth = 1.2
 			opt.ValueFormatter = func(f float64) string {
 				return fmt.Sprintf("%.2f", f)

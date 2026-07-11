@@ -5,6 +5,15 @@
     "config:best-practices"
   ],
   "minimumReleaseAge": "14 days",
+  "packageRules": [
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["golang"],
+      "matchUpdateTypes": ["digest"],
+      "minimumReleaseAge": null,
+      "automerge": true
+    }
+  ],
   "pre-commit": {
     "enabled": true
   },

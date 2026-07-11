@@ -112,7 +112,7 @@ func sanitizeHTTPClientError(err error) error {
 	return appotel.SanitizeError(err)
 }
 
-func errorMessageChanged(original error, sanitized error) bool {
+func errorMessageChanged(original, sanitized error) bool {
 	originalNil := original == nil
 	sanitizedNil := sanitized == nil
 	if originalNil || sanitizedNil {
@@ -348,7 +348,7 @@ func applyUpdateAttributes(span trace.Span, name string, literal string, update 
 // middleware (inner) and returns a single bot.Middleware. literal is the
 // exact command text the user typed (e.g. "/lc" vs "!lc"); it is recorded in
 // the bot.command.literal attribute.
-func obs(name string, literal string) bot.Middleware {
+func obs(name, literal string) bot.Middleware {
 	return func(next bot.HandlerFunc) bot.HandlerFunc {
 		return tracingMiddleware(name, literal, requestLoggingMiddleware(next))
 	}

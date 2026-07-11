@@ -13,6 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const finnhubEndpointAttr = "finnhub.endpoint"
+
 // financialMetricsResponse is the top-level JSON envelope from
 // Finnhub GET /stock/metric?metric=all. Metric fields are nested under
 // the "metric" key.
@@ -107,7 +109,7 @@ func fetchFinancialMetrics(ctx context.Context, symbol string) (metrics *Financi
 	ctx, span := tracer().Start(
 		ctx, "finnhub.metrics",
 		trace.WithAttributes(
-			attribute.String("finnhub.endpoint", "metrics"),
+			attribute.String(finnhubEndpointAttr, "metrics"),
 			attribute.String("symbol", symbol),
 		),
 	)
@@ -159,7 +161,7 @@ func fetchEarningsHistory(ctx context.Context, symbol string) (entries []Earning
 	ctx, span := tracer().Start(
 		ctx, "finnhub.earnings",
 		trace.WithAttributes(
-			attribute.String("finnhub.endpoint", "earnings"),
+			attribute.String(finnhubEndpointAttr, "earnings"),
 			attribute.String("symbol", symbol),
 		),
 	)
@@ -212,7 +214,7 @@ func fetchRecommendation(ctx context.Context, symbol string) (trend *Recommendat
 	ctx, span := tracer().Start(
 		ctx, "finnhub.recommendation",
 		trace.WithAttributes(
-			attribute.String("finnhub.endpoint", "recommendation"),
+			attribute.String(finnhubEndpointAttr, "recommendation"),
 			attribute.String("symbol", symbol),
 		),
 	)
@@ -268,7 +270,7 @@ func fetchPriceTarget(ctx context.Context, symbol string) (target *PriceTarget, 
 	ctx, span := tracer().Start(
 		ctx, "finnhub.price_target",
 		trace.WithAttributes(
-			attribute.String("finnhub.endpoint", "price_target"),
+			attribute.String(finnhubEndpointAttr, "price_target"),
 			attribute.String("symbol", symbol),
 		),
 	)

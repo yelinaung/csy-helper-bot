@@ -24,6 +24,8 @@ import (
 const (
 	defaultGeminiModelName = "gemini-3.5-flash"
 	defaultExplainTimeout  = 60 * time.Second
+	genAIProviderNameAttr  = "gen_ai.provider.name"
+	genAIRequestModelAttr  = "gen_ai.request.model"
 
 	// Input and response limits are measured in runes so multi-byte Telegram
 	// text, such as Burmese and emoji, is not split mid-character.
@@ -342,9 +344,9 @@ func (g *geminiExplainer) explainWithTextAndImage(ctx context.Context, text stri
 // Gemini generate_content call.
 func geminiGenAIAttrs(model string) []attribute.KeyValue {
 	return []attribute.KeyValue{
-		attribute.String("gen_ai.provider.name", "gemini"),
+		attribute.String(genAIProviderNameAttr, "gemini"),
 		attribute.String("gen_ai.operation.name", "generate_content"),
-		attribute.String("gen_ai.request.model", model),
+		attribute.String(genAIRequestModelAttr, model),
 	}
 }
 
@@ -358,15 +360,15 @@ func recordGeminiTokenUsage(ctx context.Context, model string, resp *genai.Gener
 	hist := appotel.Instruments().GenAITokenUsage
 	if um.PromptTokenCount > 0 {
 		hist.Record(ctx, float64(um.PromptTokenCount), metric.WithAttributes(
-			attribute.String("gen_ai.provider.name", "gemini"),
-			attribute.String("gen_ai.request.model", model),
+			attribute.String(genAIProviderNameAttr, "gemini"),
+			attribute.String(genAIRequestModelAttr, model),
 			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeInput),
 		))
 	}
 	if um.CandidatesTokenCount > 0 {
 		hist.Record(ctx, float64(um.CandidatesTokenCount), metric.WithAttributes(
-			attribute.String("gen_ai.provider.name", "gemini"),
-			attribute.String("gen_ai.request.model", model),
+			attribute.String(genAIProviderNameAttr, "gemini"),
+			attribute.String(genAIRequestModelAttr, model),
 			attribute.String("gen_ai.token.type", appotel.GenAITokenTypeOutput),
 		))
 	}

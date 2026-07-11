@@ -124,24 +124,13 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quoted)
 
-	var explanation string
-	var err error
-	if repliedPhoto != nil {
-		imageBytes, mimeType, downloadErr := downloadTelegramPhoto(ctx, b, repliedPhoto.FileID)
-		if downloadErr != nil {
-			appotel.RecordOutcome(ctx, "error")
-			log.Error().Err(downloadErr).Msg("Failed to download replied photo")
-			sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
-				"Failed to download the replied image. Please try again.")
-			return
-		}
-		if quoted != "" {
-			explanation, err = textExplainer.explainWithTextAndImage(ctx, quoted, imageBytes, mimeType, question, respondInBurmese)
-		} else {
-			explanation, err = textExplainer.explainWithImage(ctx, imageBytes, mimeType, question, respondInBurmese)
-		}
-	} else {
-		explanation, err = answerTextQuestion(ctx, quoted, question, respondInBurmese)
+	explanation, err := answerAskQuestion(ctx, b, repliedPhoto, quoted, question, respondInBurmese)
+	if errors.Is(err, errAskPhotoDownload) {
+		appotel.RecordOutcome(ctx, "error")
+		log.Error().Err(err).Msg("Failed to download replied photo")
+		sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr,
+			"Failed to download the replied image. Please try again.")
+		return
 	}
 	if err != nil {
 		// A safety block is an expected verdict from Gemini, not an application
@@ -159,6 +148,29 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	appotel.RecordOutcome(ctx, "success")
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+var errAskPhotoDownload = errors.New("download replied photo")
+
+func answerAskQuestion(
+	ctx context.Context,
+	b *bot.Bot,
+	photo *models.PhotoSize,
+	quoted, question string,
+	respondInBurmese bool,
+) (string, error) {
+	if photo == nil {
+		return answerTextQuestion(ctx, quoted, question, respondInBurmese)
+	}
+
+	imageBytes, mimeType, err := downloadTelegramPhoto(ctx, b, photo.FileID)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errAskPhotoDownload, err)
+	}
+	if quoted != "" {
+		return textExplainer.explainWithTextAndImage(ctx, quoted, imageBytes, mimeType, question, respondInBurmese)
+	}
+	return textExplainer.explainWithImage(ctx, imageBytes, mimeType, question, respondInBurmese)
 }
 
 // answerTextQuestion answers a text-only ask request. When Parallel search is

@@ -16,7 +16,10 @@ import (
 	stdoutlog "go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	stdoutmetric "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	stdouttrace "go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // BuildInfo carries ldflags-derived build metadata for the resource.
@@ -154,40 +157,51 @@ func Setup(ctx context.Context, info BuildInfo) (shutdown func() error, logWrite
 // signals get a nil exporter (NewProviders installs a noop provider for them).
 func buildExporters(ctx context.Context, cfg config) (Exporters, error) {
 	var exp Exporters
-	var err error
 
 	if cfg.tracesEnabled {
-		if cfg.exporterStdout {
-			exp.Traces, err = stdouttrace.New()
-		} else {
-			exp.Traces, err = otlptracehttp.New(ctx)
-		}
+		var err error
+		exp.Traces, err = buildTraceExporter(ctx, cfg.exporterStdout)
 		if err != nil {
 			return exp, err
 		}
 	}
 
 	if cfg.metricsEnabled {
-		if cfg.exporterStdout {
-			exp.Metrics, err = stdoutmetric.New()
-		} else {
-			exp.Metrics, err = otlpmetrichttp.New(ctx)
-		}
+		var err error
+		exp.Metrics, err = buildMetricExporter(ctx, cfg.exporterStdout)
 		if err != nil {
 			return exp, err
 		}
 	}
 
 	if cfg.logsEnabled {
-		if cfg.exporterStdout {
-			exp.Logs, err = stdoutlog.New()
-		} else {
-			exp.Logs, err = otlploghttp.New(ctx)
-		}
+		var err error
+		exp.Logs, err = buildLogExporter(ctx, cfg.exporterStdout)
 		if err != nil {
 			return exp, err
 		}
 	}
 
 	return exp, nil
+}
+
+func buildTraceExporter(ctx context.Context, stdout bool) (sdktrace.SpanExporter, error) {
+	if stdout {
+		return stdouttrace.New()
+	}
+	return otlptracehttp.New(ctx)
+}
+
+func buildMetricExporter(ctx context.Context, stdout bool) (sdkmetric.Exporter, error) {
+	if stdout {
+		return stdoutmetric.New()
+	}
+	return otlpmetrichttp.New(ctx)
+}
+
+func buildLogExporter(ctx context.Context, stdout bool) (sdklog.Exporter, error) {
+	if stdout {
+		return stdoutlog.New()
+	}
+	return otlploghttp.New(ctx)
 }

@@ -158,7 +158,7 @@ func TestParallelSearcher_InvalidJSON(t *testing.T) {
 
 func TestNewParallelSearcher(t *testing.T) {
 	t.Setenv("PARALLEL_API_KEY", "  ")
-	if searcher := newParallelSearcher(); searcher != nil {
+	if newParallelSearcher() != nil {
 		t.Error("expected nil searcher with blank key")
 	}
 

@@ -420,7 +420,7 @@ func FuzzPriceTargetUpsidePct(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, targetHigh, targetLow, targetMean, targetMedian, currentPrice, quoteCP float64) {
 		// Property: nil pointer returns nil.
-		if got := priceTargetToSanitized(nil, currentPrice); got != nil {
+		if priceTargetToSanitized(nil, currentPrice) != nil {
 			t.Fatal("priceTargetToSanitized(nil) should return nil")
 		}
 

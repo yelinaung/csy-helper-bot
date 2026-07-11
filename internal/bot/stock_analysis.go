@@ -270,28 +270,9 @@ func exaResultsToHighlights(results []exaSearchResult) []newsHighlight {
 // with rune budgets before JSON serialization.
 func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 	payload := &analysisPromptPayload{
-		Symbol: sanitizeForPrompt(input.Symbol, 10),
-	}
-	if input.Quote != nil {
-		payload.Quote = &sanitizedQuote{
-			CurrentPrice:  input.Quote.CurrentPrice,
-			Change:        input.Quote.Change,
-			PercentChange: input.Quote.PercentChange,
-			High:          input.Quote.High,
-			Low:           input.Quote.Low,
-			Open:          input.Quote.Open,
-			PreviousClose: input.Quote.PreviousClose,
-		}
-	}
-
-	if input.Profile != nil {
-		sp := &sanitizedProfile{
-			Name:       sanitizeForPrompt(input.Profile.Name, maxProfileNameRuneLen),
-			MarketCapB: input.Profile.MarketCapitalization / 1000, // Finnhub returns millions USD.
-			Industry:   sanitizeForPrompt(input.Profile.Industry, maxIndustryRuneLen),
-			Exchange:   sanitizeForPrompt(input.Profile.Exchange, maxExchangeRuneLen),
-		}
-		payload.Profile = sp
+		Symbol:  sanitizeForPrompt(input.Symbol, 10),
+		Quote:   sanitizeQuote(input.Quote),
+		Profile: sanitizeProfile(input.Profile),
 	}
 
 	if input.Metrics != nil {
@@ -308,15 +289,53 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 		payload.Recommendation = recommendationToSanitized(input.Recommendation)
 	}
 
-	if input.PriceTarget != nil {
-		currentPrice := 0.0
-		if input.Quote != nil {
-			currentPrice = input.Quote.CurrentPrice
-		}
-		payload.PriceTarget = priceTargetToSanitized(input.PriceTarget, currentPrice)
-	}
+	payload.PriceTarget = sanitizePriceTarget(input.PriceTarget, input.Quote)
+	payload.NewsItems = sanitizeNewsItems(input.NewsItems)
 
-	for _, ni := range input.NewsItems {
+	return payload
+}
+
+func sanitizeQuote(quote *StockQuote) *sanitizedQuote {
+	if quote == nil {
+		return nil
+	}
+	return &sanitizedQuote{
+		CurrentPrice:  quote.CurrentPrice,
+		Change:        quote.Change,
+		PercentChange: quote.PercentChange,
+		High:          quote.High,
+		Low:           quote.Low,
+		Open:          quote.Open,
+		PreviousClose: quote.PreviousClose,
+	}
+}
+
+func sanitizeProfile(profile *CompanyProfile) *sanitizedProfile {
+	if profile == nil {
+		return nil
+	}
+	return &sanitizedProfile{
+		Name:       sanitizeForPrompt(profile.Name, maxProfileNameRuneLen),
+		MarketCapB: profile.MarketCapitalization / 1000, // Finnhub returns millions USD.
+		Industry:   sanitizeForPrompt(profile.Industry, maxIndustryRuneLen),
+		Exchange:   sanitizeForPrompt(profile.Exchange, maxExchangeRuneLen),
+	}
+}
+
+func sanitizePriceTarget(target *PriceTarget, quote *StockQuote) *sanitizedPriceTarget {
+	if target == nil {
+		return nil
+	}
+	currentPrice := 0.0
+	if quote != nil {
+		currentPrice = quote.CurrentPrice
+	}
+	return priceTargetToSanitized(target, currentPrice)
+}
+
+func sanitizeNewsItems(items []newsHighlight) []newsHighlight {
+	cleanItems := make([]newsHighlight, 0, len(items))
+	for _, ni := range items {
 		clean := newsHighlight{
 			PublishedDate: ni.PublishedDate,
 			URL:           ni.URL,
@@ -329,11 +348,10 @@ func sanitizeAnalysisInput(input *stockAnalysisInput) *analysisPromptPayload {
 			}
 		}
 		if clean.Title != "" || len(clean.Highlights) > 0 {
-			payload.NewsItems = append(payload.NewsItems, clean)
+			cleanItems = append(cleanItems, clean)
 		}
 	}
-
-	return payload
+	return cleanItems
 }
 
 // sanitizeMetrics converts Finnhub's raw metric values into human-readable
@@ -846,28 +864,34 @@ func stockAnalysisHandler(ctx context.Context, b *bot.Bot, update *models.Update
 
 	analysis, err := stockAnalyzerInstance.analyze(ctx, input)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrExplainTimeout):
-			appotel.RecordOutcome(ctx, "timeout")
-		case errors.Is(err, ErrExplainBlocked):
-			appotel.RecordOutcome(ctx, "blocked")
-		default:
-			appotel.RecordOutcome(ctx, "error")
-		}
-		log.Error().Err(err).Str("symbol", symbol).Msg("Stock analysis failed")
-
-		errText := fmt.Sprintf(analysisFailedMsg, symbol)
-		if errors.Is(err, ErrExplainTimeout) {
-			errText = fmt.Sprintf(analysisTimeoutMsg, symbol)
-		}
-		if errors.Is(err, ErrExplainBlocked) {
-			errText = fmt.Sprintf(analysisUnavailableMsg, symbol)
-		}
-
-		sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, errText)
+		handleStockAnalysisError(ctx, b, update, loadingMsg, loadingErr, symbol, err)
 		return
 	}
 
 	appotel.RecordOutcome(ctx, "success")
 	sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, analysis)
+}
+
+func handleStockAnalysisError(
+	ctx context.Context,
+	b *bot.Bot,
+	update *models.Update,
+	loadingMsg *models.Message,
+	loadingErr error,
+	symbol string,
+	err error,
+) {
+	outcome := "error"
+	errText := fmt.Sprintf(analysisFailedMsg, symbol)
+	switch {
+	case errors.Is(err, ErrExplainTimeout):
+		outcome = "timeout"
+		errText = fmt.Sprintf(analysisTimeoutMsg, symbol)
+	case errors.Is(err, ErrExplainBlocked):
+		outcome = "blocked"
+		errText = fmt.Sprintf(analysisUnavailableMsg, symbol)
+	}
+	appotel.RecordOutcome(ctx, outcome)
+	log.Error().Err(err).Str("symbol", symbol).Msg("Stock analysis failed")
+	sendOrEditAnalysisResult(ctx, b, update, loadingMsg, loadingErr, errText)
 }

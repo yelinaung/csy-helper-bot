@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/NimbleMarkets/dbn-go v0.9.1
-	github.com/go-analyze/charts v0.5.27
+	github.com/go-analyze/charts v0.6.0
 	github.com/go-telegram/bot v1.21.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.35.1
@@ -38,7 +38,7 @@ require (
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/go-analyze/bulk v0.1.3 // indirect
+	github.com/go-analyze/bulk v0.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect

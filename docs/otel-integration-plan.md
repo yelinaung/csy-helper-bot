@@ -435,8 +435,8 @@ func newSanitizingExporter(base sdktrace.SpanExporter) sdktrace.SpanExporter
 
 ### `zerolog_bridge.go`
 
-A writer-based bridge (the OTel contrib project does not ship a stable zerolog
-bridge as of writing, so we write a small one):
+The OTel contrib project ships no stable zerolog bridge as of writing, so we
+write a small writer-based one:
 
 ```go
 // otelLogWriter is an io.Writer that parses each zerolog JSON line and
@@ -600,8 +600,8 @@ it), so the sanitizer remains the permanent guard for that call.
 ### Handler tracing middleware
 
 A new `tracingMiddleware` in `internal/bot/bot.go` composes with the existing
-`requestLoggingMiddleware`. It is applied as the **outermost** wrapper so the
-span covers the access check and the handler:
+`requestLoggingMiddleware`. It wraps **outermost** so the span covers the
+access check and the handler:
 
 ```go
 func tracingMiddleware(name string, next bot.HandlerFunc) bot.HandlerFunc {
@@ -650,13 +650,13 @@ func tracingMiddleware(name string, next bot.HandlerFunc) bot.HandlerFunc {
 
 ### HTTP client instrumentation
 
-The three package-level HTTP clients (`httpClient`, `histHTTPClient`,
-`parallelHTTPClient`) are rewired in an explicit `init()` in `internal/bot` to
-use `otel.NewHTTPTransport` around their existing transports (preserving the
-10s/30s/no-timeout client timeouts). See the [double-wrap guard](#httpgo) note.
+An explicit `init()` in `internal/bot` rewires the three package-level HTTP
+clients (`httpClient`, `histHTTPClient`, `parallelHTTPClient`) to use
+`otel.NewHTTPTransport` around their existing transports, preserving the
+10s/30s/no-timeout client timeouts. See the [double-wrap guard](#httpgo) note.
 
-For each fetch function, a **manual parent span** is added so the trace UI
-shows a domain-level operation above the automatic HTTP client span:
+Each fetch function gains a **manual parent span** so the trace UI shows a
+domain-level operation above the automatic HTTP client span:
 
 ```go
 func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
@@ -671,14 +671,14 @@ func fetchStockQuote(ctx context.Context, symbol string) (*StockQuote, error) {
 }
 ```
 
-Manual spans are added to all 11 HTTP fetch sites + the 3 Gemini call sites.
+All 11 HTTP fetch sites and the 3 Gemini call sites get manual spans.
 The `downloadTelegramPhoto` call gets a `telegram.download_photo` parent span
 (the HTTP GET is a child; its `url.full` is sanitized at export).
 
 ### Gemini instrumentation (manual spans, semconv-conformant)
 
 The genai SDK does not expose an HTTP transport we can wrap, so each
-`GenerateContent` call site is wrapped in a manual span using GenAI semantic
+`GenerateContent` call site gets a manual span with GenAI semantic
 conventions:
 
 ```go
@@ -714,8 +714,8 @@ Three call sites:
 
 ### Metrics instruments
 
-Defined once in `internal/otel` as the `Instruments` struct, built from the
-`MeterProvider` in `NewProviders`:
+The `Instruments` struct, built from the `MeterProvider` in `NewProviders`,
+defines these once in `internal/otel`:
 
 | Instrument | Type | Unit | Attributes | Recorded where |
 |---|---|---|---|---|

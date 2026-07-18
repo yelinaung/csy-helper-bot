@@ -3,37 +3,27 @@
 [![CI/CD Pipeline](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/yelinaung/csy-helper-bot/actions/workflows/ci.yml)
 
 > [!IMPORTANT]
-> **Disclaimer**: This application was developed primarily by AI coding agents (Claude/Amp) as an experimental project. While functional, **quality is not guaranteed**. If you choose to use or deploy this bot, please do so with c
-aution, review the code yourself, and understand that it may contain bugs or security issues. Use at your own risk.
+> **Disclaimer**: AI coding agents (Claude/Amp) wrote most of this bot as an experiment. It runs, but nothing guarantees its quality. Review the code before you deploy it — it may contain bugs or security holes. Use at your own risk.
 
-A Telegram bot that provides helpful utilities for developers.
+A Telegram bot that posts stock quotes and charts, answers questions with Gemini, and fetches the daily LeetCode problem for allowlisted group chats.
 
-## Features
+## Commands
 
-- `/lc` or `!lc` - Fetches the daily LeetCode question with title, difficulty, and link
-- `!s SYMBOL` - Get real-time stock price (e.g., `!s AAPL`)
-- `!s SYMBOL 7d|30d|60d|90d` - Get historical stock chart image + summary (e.g., `!s AAPL 7d`)
-- `!sa SYMBOL` - AI-generated stock analysis using Exa news + Gemini (e.g., `!sa AAPL`)
-- `@<bot_username> <question>` - Asks anything with Gemini (works with or without quoting a message)
-- Burmese-aware answers:
-  - If requester text or quoted text contains Burmese, answer in Burmese
-- Tone/persona variation:
-  - Random tone per explain/ask response with matching facial-expression emoji
-- In-memory rate limiting for explain/ask requests
-- Group allowlist enforcement:
-  - Bot is active only in allowlisted groups/supergroups
-  - Bot ignores private chats
-  - Bot leaves unauthorized groups automatically
-- Structured logging with human-readable console output (zerolog)
-- Optional OpenTelemetry traces, metrics, and logs export (disabled by default)
+- `/lc` or `!lc` — posts the daily LeetCode question with its title, difficulty, and link
+- `!s AAPL` — real-time stock quote
+- `!s AAPL 7d` — historical chart image with a summary (`30d`, `60d`, and `90d` also work)
+- `!sa AAPL` — stock analysis: the current quote, latest news from Exa, and a Gemini summary
+- `@<bot_username> <question>` — answers the question with Gemini, with or without a quoted message (e.g. `@<bot_username> what does mutex mean?`, or reply to a message and ask `can you explain this?`)
+
+When the question or the quoted message contains Burmese, the bot answers in Burmese. Each answer picks a random tone with a matching facial-expression emoji. An in-memory rate limiter caps how often users can ask.
 
 ## Setup
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and get your token
-2. Get a free API key from [Finnhub](https://finnhub.io/) for stock prices
-3. Get a Databento API key from [Databento](https://databento.com/) for historical stock data
-4. Get an API key from [Exa](https://exa.ai/) for web search (required for `!sa` command)
-5. (Optional) Get an API key from [Parallel](https://parallel.ai/) so questions about current events are grounded in fresh web search results
+1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token
+2. Get a free [Finnhub](https://finnhub.io/) API key for stock quotes
+3. Get a [Databento](https://databento.com/) API key for historical stock data
+4. Get an [Exa](https://exa.ai/) API key for web search (the `!sa` command requires it)
+5. (Optional) Get a [Parallel](https://parallel.ai/) API key so answers about current events draw on fresh web search results
 6. Create a `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
@@ -42,15 +32,15 @@ A Telegram bot that provides helpful utilities for developers.
    # optional (defaults to EQUS.MINI)
    DATABENTO_DATASET=EQUS.MINI
    GEMINI_API_KEY=your_gemini_key_here
-    # optional (defaults to gemini-3.5-flash)
-    GEMINI_MODEL=gemini-3.5-flash
+   # optional (defaults to gemini-3.5-flash)
+   GEMINI_MODEL=gemini-3.5-flash
    # optional (defaults to 60)
    GEMINI_TIMEOUT_SECONDS=60
    # Stock analysis (optional — requires GEMINI_API_KEY + EXA_API_KEY)
    STOCK_ANALYSIS_ENABLED=true
    EXA_API_KEY=your_exa_key_here
-    # optional (defaults to GEMINI_MODEL or gemini-3.5-flash)
-    STOCK_ANALYSIS_MODEL=gemini-3.5-flash
+   # optional (defaults to GEMINI_MODEL or gemini-3.5-flash)
+   STOCK_ANALYSIS_MODEL=gemini-3.5-flash
    # optional (defaults to 90)
    STOCK_ANALYSIS_TIMEOUT_SECONDS=90
    # optional (defaults to 5 requests per 300 seconds)
@@ -88,41 +78,24 @@ A Telegram bot that provides helpful utilities for developers.
    go run ./cmd/csy-helper-bot
    ```
 
-## Usage
-
-- Stock commands:
-  - `!s AAPL` - current quote
-  - `!s AAPL 7d` - 7-day historical chart image
-  - `!s AAPL 30d` - 30-day historical chart image (+ 60d/90d also supported)
-  - `!sa AAPL` - AI stock analysis (quote + latest news + Gemini summary)
-- Ask directly:
-  - `@<bot_username> what does mutex mean?`
-  - `@<bot_username> can you explain this and that?` (while replying to a quoted message)
-
 ## Access Control
 
-- The bot only responds in `group` / `supergroup` chats.
-- Private chats are ignored.
-- Groups must be listed in `ALLOWED_GROUP_IDS`.
-- If a group is not allowlisted, the bot leaves that group.
+The bot responds only in groups and supergroups listed in `ALLOWED_GROUP_IDS`. It ignores private chats, and it leaves any group not on the list.
 
 ## Observability (OpenTelemetry)
 
-Telemetry export is **off by default**. Set `OTEL_ENABLED=true` to ship
-traces, metrics, and logs over OTLP/HTTP to a local collector such as
-[HyperDX](https://www.hyperdx.io/) or [Clickstack](https://clickstack.io/),
-both of which ingest on the standard `http://localhost:4318` endpoint.
+The bot logs to the console through zerolog. Telemetry export is **off by default**; set `OTEL_ENABLED=true` to ship traces, metrics, and logs over OTLP/HTTP to a local collector such as [HyperDX](https://www.hyperdx.io/) or [Clickstack](https://clickstack.io/), both of which ingest on the standard `http://localhost:4318` endpoint.
 
-When enabled:
+When enabled, the bot exports:
 
 - **Traces** — one span per registered handler plus child spans for every
   external call (Finnhub, Databento, LeetCode, Exa, Parallel, Telegram photo
-  download, Gemini). HTTP client spans/metrics come from `otelhttp`.
+  download, Gemini). HTTP client spans and metrics come from `otelhttp`.
 - **Metrics** — `bot.commands.total` and `bot.command.duration` (with a
   `bot.result` dimension of `success`/`error`/`rate_limited`/`unknown`/...),
   `bot.rate_limited.total`, and `gen_ai.client.token.usage` (a histogram).
-- **Logs** — the existing zerolog output is bridged into the OTel logs
-  pipeline alongside the console output.
+- **Logs** — the zerolog output, bridged into the OTel logs pipeline
+  alongside the console output.
 
 ### Credential safety
 
@@ -136,7 +109,7 @@ same redaction to `url`-bearing log attributes.
 ### Local debugging
 
 Set `OTEL_EXPORTER=stdout` to print telemetry to stdout instead of exporting
-it (no collector needed). Individual signals can be turned off with
+it — no collector needed. Turn off individual signals with
 `OTEL_TRACES_ENABLED=false`, `OTEL_METRICS_ENABLED=false`, or
 `OTEL_LOGS_ENABLED=false` while keeping the others on.
 
@@ -194,13 +167,13 @@ git push dokku master
 
 ## Group Privacy
 
-If using commands via mention in groups, you may need to disable Group Privacy Mode via [@BotFather](https://t.me/BotFather) → Bot Settings → Group Privacy → Turn off.
+If the bot misses mentions in a group, disable Group Privacy Mode via [@BotFather](https://t.me/BotFather) → Bot Settings → Group Privacy → Turn off.
 
 ## Troubleshooting
 
 ### "Conflict: terminated by other getUpdates request"
 
-This error means multiple bot instances are trying to poll Telegram with the same token. Only one instance can use long-polling at a time.
+Telegram allows only one long-polling connection per bot token. This error means a second instance is polling with the same token.
 
 **Solutions:**
 1. Stop any local bot instances before deploying
@@ -208,7 +181,7 @@ This error means multiple bot instances are trying to poll Telegram with the sam
    ```bash
    dokku ps:scale csy-helper-bot web=1
    ```
-3. If issues persist during deploys, disable zero-downtime:
+3. If the error persists during deploys, disable zero-downtime checks:
    ```bash
    dokku checks:disable csy-helper-bot web
    ```

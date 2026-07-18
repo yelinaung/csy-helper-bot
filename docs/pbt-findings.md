@@ -1,16 +1,16 @@
 # PBT Findings & Opportunities
 
-A review of `internal/bot/` for property-based testing (PBT) opportunities with
-[Hegel](https://hegel.dev), and the bugs that review surfaced. The repo
-already has 16 native Go `Fuzz*` tests in `internal/bot/fuzz_test.go`; this
-document focuses on **new** opportunities and the bugs those tests would find
-but currently don't.
+A review of `internal/bot/` surfaced four confirmed bugs and a set of
+property-based testing (PBT) opportunities for [Hegel](https://hegel.dev).
+The repo already has 16 native Go `Fuzz*` tests in
+`internal/bot/fuzz_test.go`; the opportunities below add **new** coverage and
+would catch bugs the existing tests miss.
 
 ## Confirmed bugs
 
-Each bug below was verified with a temporary repro test (since deleted) run
-against the current source. Repro output is included so the failure mode is
-concrete.
+A temporary repro test (since deleted) confirmed each bug against the
+current source. The repro output under each bug shows the concrete failure
+mode.
 
 ### Bug 1 — `priceTargetToSanitized` emits `+Inf`, breaking JSON marshal
 
@@ -445,8 +445,8 @@ each tier is by expected value.
 
 ### Review-pass additions
 
-These were surfaced in a second review pass and are numbered to continue
-the list above without renumbering existing entries. Tier is noted inline.
+A second review pass surfaced these. Numbering continues from the list
+above so existing entries keep their numbers; tier is noted inline.
 
 #### 12. Output-safety PBT for `plainTelegramMarkdownText` — Tier 1
 

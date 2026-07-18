@@ -2,7 +2,7 @@
 
 ## Overview
 
-Enhance the `!sa SYMBOL` command from a flat "summary" analysis to a deeper, sectioned analysis by adding:
+Upgrade the `!sa SYMBOL` command from a flat summary to a deeper, sectioned analysis by adding:
 
 1. **Earnings & fundamentals data** — P/E, EPS, revenue, margins, earnings surprises from Finnhub
 2. **Analyst consensus data** — buy/hold/sell trends from Finnhub
@@ -33,7 +33,7 @@ The `!sa` pipeline feeds Gemini:
 - **Profile** (name, market cap, industry, exchange)
 - **Exa news** (5 web highlights with titles, URLs, dates)
 
-The prompt asks for a flat response covering metrics, news, sentiment, and risks — producing decent but shallow output. No fundamental data (P/E, EPS, revenue, margins) and no analyst data means Gemini has nothing to analyze beyond price action and news sentiment.
+The prompt asks for a flat response covering metrics, news, sentiment, and risks; the output is decent but shallow. Without fundamentals (P/E, EPS, revenue, margins) or analyst data, Gemini has nothing to analyze beyond price action and news sentiment.
 
 ## Architecture (Updated)
 
@@ -114,15 +114,15 @@ stockAnalysisHandler
 
 All three new Finnhub calls are independent of each other and of Exa. Each is a fast sub-200ms GET. All three can run **sequentially after Exa**, keeping the simple sequential pattern without goroutine complexity.
 
-Alternative considered: parallel with Exa (saves ~200ms). Not worth the goroutine/channel overhead for such a small gain when the Gemini call is the 30-90s bottleneck.
+Running them in parallel with Exa would save about 200ms — not worth the goroutine and channel overhead when the Gemini call is the 30-90s bottleneck.
 
 ### Loading-Message UX
 
-The loading message stays `"Analyzing data for {symbol}..."` for the entire flow. Three extra ~200ms Finnhub calls are invisible to the user since the Gemini call dominates at 30-90s. No per-fetch progress text is added — it would flash by too quickly to be readable and adds HTTP noise.
+The loading message stays `"Analyzing data for {symbol}..."` for the entire flow. Three extra ~200ms Finnhub calls are invisible to the user since the Gemini call dominates at 30-90s. The handler adds no per-fetch progress text — it would flash by too quickly to read and would only add HTTP noise.
 
 ### 52-Week High/Low Duplication
 
-The `sanitizedMetrics` struct includes `high_52w` and `low_52w`, and the prompt's **Price & Market** section asks Gemini to compare the daily range to the 52-week range. This is intentional: providing 52-week data in the metrics payload (where it naturally lives in Finnhub's response) and prompting Gemini to use it in the price section gives the model flexibility to place the insight where it fits best. Future reviewers should not try to deduplicate this.
+The `sanitizedMetrics` struct includes `high_52w` and `low_52w`, and the prompt's **Price & Market** section asks Gemini to compare the daily range to the 52-week range. The duplication is intentional: the data lives in the metrics payload (where Finnhub puts it), and the price-section prompt tells Gemini to use it, so the model can place the insight where it fits best. Do not deduplicate this.
 
 ## New Types
 
@@ -263,7 +263,7 @@ func fetchPriceTarget(ctx context.Context, symbol string) (*PriceTarget, error)
 
 The plan currently includes quarterly earnings history (actual vs estimate,
 surprise) but omits the market's reaction — how did the stock move the next
-trading day? This is the half of the earnings story that matters most.
+trading day? That reaction is the half of the earnings story that matters most.
 
 For each of the 4 earnings periods, the handler fetches the next trading day's
 closing price from Databento (using the existing `fetchHistoricalBars`
@@ -512,7 +512,7 @@ available, `NextDayChangePct` is left as zero and omitted from JSON. Capped at
 
 ### `recommendationToSanitized(rec *RecommendationTrend) *sanitizedRecommendation`
 
-Pass-through conversion. Integer counts, no text fields.
+A pass-through conversion: integer counts only, no text fields.
 
 ### `priceTargetToSanitized(pt *PriceTarget) *sanitizedPriceTarget`
 
@@ -544,7 +544,7 @@ Current `maxPromptTotalRuneLen` is 4000 runes. Adding metrics (~400 chars JSON),
    5. Drop news items one at a time from the tail (existing behavior, `stock_analysis.go:243`)
 
    Each step is a top-level assignment followed by `json.MarshalIndent` — not
-   nested loops. This keeps the cascade easy to read and test. The current
+   nested loops. The flat sequence keeps the cascade easy to read and test. The current
    implementation only drops news items; the refactor replaces that single loop
    with the 5-stage cascade. Tests must cover each transition point.
 3. **Zero-value omission**: `omitempty` on all sanitized types keeps the payload compact — zero-valued metrics don't consume budget
@@ -560,9 +560,9 @@ const maxPromptTotalRuneLen = 6000 // increased from 4000
 
 ### In `stock_fundamentals.go` (new file)
 
-Finnhub fundamentals are split into a dedicated file. `stock.go` is already ~700
-lines and handles quote, profile, and historical-chart rendering. Separating
-fundamentals keeps `stock.go` focused and avoids bloating it past 800 lines.
+Finnhub fundamentals go in a dedicated file: `stock.go` is already ~700 lines
+of quote, profile, and historical-chart rendering, and fundamentals would push
+it past 800. A separate file keeps the two layers distinct.
 
 | Function | Signature | Purpose |
 |---|---|---|
@@ -592,7 +592,7 @@ Each follows the existing pattern from `fetchCompanyProfile` — parse URL from
 | Earnings fetch failure | Not user-facing — logged as warn, analysis continues without earnings |
 | Recommendation fetch failure | Not user-facing — logged as warn, analysis continues without consensus |
 
-No new user-facing error messages. These data sources are non-critical for the analysis flow.
+There are no new user-facing error messages — these data sources are non-critical to the analysis flow.
 
 ## Handler Updates
 
@@ -794,8 +794,8 @@ call with a comparative prompt. Estimated ~400 LOC.
 
 ### v6 — Per-Chat Watchlist
 
-The moat. `!sa watch AAPL`, `!sa unwatch AAPL`, `!sa watchlist`. Stored
-against `chat_id`. Unlocks:
+The watchlist is the moat: `!sa watch AAPL`, `!sa unwatch AAPL`, and
+`!sa watchlist`, stored against `chat_id`. It unlocks:
 - **Daily/weekly digest** (cron via background goroutine) — "Your watchlist this week: AAPL +2.3%, MSFT -0.8%"
 - **Earnings pings** via Finnhub `/calendar/earnings` — "AAPL reports Thursday after close"
 - **Significant-move alerts** — ±5% daily on watched tickers triggers a chat message

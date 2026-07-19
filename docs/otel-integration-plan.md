@@ -37,6 +37,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 > **Non-normative notice:** Sections with concrete signatures, line counts, and
 > Go snippets are design guidance that may drift from the final code.
 > Authoritative references will live in:
+>
 > - `internal/otel/` — providers, exporters, sanitizer, zerolog bridge
 > - `internal/bot/bot.go` — handler registration, middleware, outcome recorder
 > - `cmd/csy-helper-bot/main.go` — logger wiring, shutdown orchestration
@@ -78,7 +79,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 - **Profiling / exemplars** — not in v1.
 - **Handler error returns** — handlers swallow errors today; a reliable
   `result=error` metric dimension is deferred to v4 (see
-  [Outcome Recording](#outcome-recorder) for the v1 `unknown` default).
+  [Outcome Recording](#outcomego--handler-outcome-recorder-p1) for the v1 `unknown` default).
 
 ## Current State
 
@@ -95,6 +96,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
     (`internal/bot/bot.go:171`), which logs the incoming update and enforces
     the group allowlist before dispatching.
 - **External calls** (instrumentation targets) with **credential location**:
+
   | Service | Function | Transport | Client | Secret in URL? |
   |---|---|---|---|---|
   | Finnhub quote | `fetchStockQuote` (`stock.go:339`) | HTTP GET | `httpClient` (10s) | **Yes** — `token=` query |
@@ -451,12 +453,14 @@ func (w *otelLogWriter) Write(p []byte) (int, error)
 - zerolog always emits one JSON object per line followed by `\n`; the writer
   splits on newlines and decodes each line with `encoding/json`.
 - Field mapping:
+
   | zerolog JSON key | OTel log record field |
   |---|---|
   | `time` | `Record.Timestamp` |
   | `level` | `Record.Severity` (map: trace→TRACE, debug→DEBUG, info→INFO, warn→WARN, error→ERROR, fatal→FATAL, panic→FATAL) |
   | `message` | `Record.Body` (StringValue) |
   | every other key | `Record.Attributes` (best-effort type inference: number→Float64, bool→Bool, string→String, object/array→String of raw JSON) |
+
 - `Record.ObservedTimestamp` is set to `time.Now()` to preserve export order.
 - **Log-side URL redaction (P0, review #3):** before attaching any attribute
   whose key is `url`, `url.full`, `http.url`, or `request.url`, the bridge
@@ -645,8 +649,8 @@ func tracingMiddleware(name string, next bot.HandlerFunc) bot.HandlerFunc {
   `b.RegisterHandler(..., obs("/start", startHandler))` where
   `obs(name, h) = tracingMiddleware(name, requestLoggingMiddleware(h))`.
 - Both `/lc` and `!lc` registrations map to the same span name `bot.lc`; the
-  `bot.command.literal` attribute distinguishes them. Same for `!s`/`!s ` →
-  `bot.stock` and `!sa`/`!sa ` → `bot.stock_analysis`.
+  `bot.command.literal` attribute distinguishes them. Same for `!s`/`!s` →
+  `bot.stock` and `!sa`/`!sa` → `bot.stock_analysis`.
 
 ### HTTP client instrumentation
 
@@ -708,6 +712,7 @@ resp, err := g.generator.GenerateContent(ctx, model, contents, config)
 > `gen_ai.request.operation` attribute if finer granularity is needed.
 
 Three call sites:
+
 - `doExplain` (`gemini_explainer.go:336`) — `gemini.explain`
 - `classifySearchNeed` (`freshness_classifier.go:42`) — `gemini.classify`
 - `stockAnalyzer.analyze` (`stock_analysis.go`) — `gemini.analyze`
@@ -733,7 +738,7 @@ defines these once in `internal/otel`:
 > distributions for free. If a pure total is also wanted, add a clearly-custom
 > `bot.gen_ai.tokens.total` counter — but the semconv name must stay a
 > histogram. See [Design Decisions #17](#design-decisions-log).
-
+>
 > **`bot.result` default is `unknown` (P1, review #4):** Handlers swallow
 > errors, so `error` cannot be reliably detected in v1. Emitting
 > `result=success` by default would give dashboards a false green. The default
@@ -780,8 +785,8 @@ one span name.
 | `bot.start` | `/start` | internal | — | `bot.command`, `bot.command.literal`, `bot.chat_id`, `bot.user_id`, `bot.result` |
 | `bot.help` | `/help` | internal | — | same |
 | `bot.lc` | `/lc`, `!lc` | internal | `leetcode.daily` | same |
-| `bot.stock` | `!s`, `!s ` | internal | `finnhub.quote`/`finnhub.profile`/`databento.get_range` | same + `symbol` |
-| `bot.stock_analysis` | `!sa`, `!sa ` | internal | `finnhub.*` + `exa.search` + `gemini.analyze` | same + `symbol` |
+| `bot.stock` | `!s`, `!s` | internal | `finnhub.quote`/`finnhub.profile`/`databento.get_range` | same + `symbol` |
+| `bot.stock_analysis` | `!sa`, `!sa` | internal | `finnhub.*` + `exa.search` + `gemini.analyze` | same + `symbol` |
 | `bot.ask` | mention match | internal | `gemini.explain`/`gemini.classify`/`parallel.search` | same |
 | `bot.photo_ask` | photo + mention | internal | `telegram.download_photo` + `gemini.explain` | same |
 | `bot.xlink` | x.com/twitter link | internal | — | same |
@@ -985,7 +990,7 @@ mise run lint
 
 1. Add `tracingMiddleware` + the `obs(handler, name)` registration helper.
 2. Rewire all `b.RegisterHandler*` calls and the default handler; collapse
-   `/lc`+`!lc` → `bot.lc`, `!s`+`!s ` → `bot.stock`, `!sa`+`!sa ` →
+   `/lc`+`!lc` → `bot.lc`, `!s`+`!s` → `bot.stock`, `!sa`+`!sa` →
    `bot.stock_analysis` (literal in `bot.command.literal`).
 3. Rewire `httpClient`, `histHTTPClient`, `parallelHTTPClient` transports via
    `otel.NewHTTPTransport` in `init()` (with the double-wrap guard).
@@ -1077,7 +1082,7 @@ mise run lint
 | 14 | **Safe span name `"<METHOD> <HOST>"`, never full URL** | The span name is the first thing visible in trace UIs. Using only method + host guarantees no credential leaks in the name regardless of the sanitizer. The URL attribute (sanitized) is in attributes, used for filtering — the sanitizer redacts both `url.full` and `http.url` so the contrib's semconv version does not matter. |
 | 15 | **`gen_ai.client.token.usage` as a Histogram, matching semconv (P2)** | The OTel GenAI semconv defines this exact metric name as a histogram. Reusing a reserved semconv name with a different instrument type (counter) can break semconv-aware backends. A histogram still sums for "total spend per model" and gives per-request distributions. If a pure total is also wanted, add a clearly-custom `bot.gen_ai.tokens.total` counter — but the semconv name stays a histogram. |
 | 16 | **Pin one semconv version; use `gen_ai.provider.name`** | The older `gen_ai.system` attribute is deprecated in newer semconv; `gen_ai.provider.name` is current. Pin `semconv/v1.30.0` (or latest stable at implementation time) across the project. The `otelhttp` contrib emits attributes per its own semconv version — verify compatibility at implementation time and align the project import if needed. If `gen_ai.*` constants are not generated in the pinned version, define string constants in `internal/otel` matching the spec. |
-| 17 | **Handler span names are operation names; aliases collapse** | `/lc` and `!lc` both map to span `bot.lc` (the literal `/lc` vs `!lc` is in `bot.command.literal`). Same for `!s`/`!s ` → `bot.stock` and `!sa`/`!sa ` → `bot.stock_analysis`. ~9 fixed span names is low cardinality and far more readable than using the raw literal as the span name; the `bot.command` + `bot.command.literal` attributes enable exact filtering. |
+| 17 | **Handler span names are operation names; aliases collapse** | `/lc` and `!lc` both map to span `bot.lc` (the literal `/lc` vs `!lc` is in `bot.command.literal`). Same for `!s`/`!s` → `bot.stock` and `!sa`/`!sa` → `bot.stock_analysis`. ~9 fixed span names is low cardinality and far more readable than using the raw literal as the span name; the `bot.command` + `bot.command.literal` attributes enable exact filtering. |
 | 18 | **Resource build info passed via `BuildInfo`, not imported from `main`** | `main` is package `main` and cannot be imported. `Setup` takes a small `BuildInfo{Commit, Date}` struct so `internal/otel` stays importable and testable. |
 | 19 | **Telegram Bot API SDK calls not instrumented in v1** | `go-telegram/bot` owns its `http.Client` and does not expose it for transport wrapping. Handler spans already capture the user-facing latency including the Telegram round trips. Wrapping the SDK is a v2 enhancement. |
 | 20 | **Transport rewire in explicit `init()` with double-wrap guard** | The package-level HTTP clients are rewired in `init()` wrapping their *original* transports. Double-wrapping (wrapping an already-otel-wrapped transport) would produce duplicate nested spans and double-counted metrics — prevented by wrapping the original transport only. Tests replace the whole `*http.Client` var, bypassing the wrapper; with a noop tracer (test default), nothing is emitted. |

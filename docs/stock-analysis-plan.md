@@ -468,6 +468,7 @@ func loadAnalysisTimeout() (time.Duration, error) {
     return time.Duration(seconds) * time.Second, nil
 }
 ```
+
 ```text
 stockAnalysisHandler
   │
@@ -726,7 +727,7 @@ to each test to prevent cross-test leakage.
 | `TestStockAnalysisHandler_RejectsRange` | `!sa AAPL 7d` → error "does not support historical ranges" |
 | `TestStockAnalysisHandler_RateLimited` | Second request within window → rate limit message |
 | `TestParseStockAnalysisCommand` | Table-driven: `!sa AAPL`, `!sa aapl`, `!sa`, `!sa AAPL 7d`, `!sa $$$` |
-| `TestRouting_SA_DoesNotTrigger_StockHandler` | `!sa AAPL` does NOT match `!s` or `!s ` patterns |
+| `TestRouting_SA_DoesNotTrigger_StockHandler` | `!sa AAPL` does NOT match `!s` or `!s` patterns |
 | `TestBuildAnalysisPrompt_FullData` | Prompt includes nonce, marker, all data fields |
 | `TestBuildAnalysisPrompt_NilProfile` | Prompt built correctly when profile is nil |
 | `TestBuildAnalysisPrompt_NoNews` | Prompt built with empty `news_items` |
@@ -926,9 +927,9 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 1. Extract `extractSymbolToken(text, prefix, usageMsg)` helper from `parseStockCommand`
 2. Refactor `parseStockCommand` to call `extractSymbolToken(text, "!s", invalidUsageSymbol)` internally
 3. Implement `parseStockAnalysisCommand` calling `extractSymbolToken(text, "!sa", analysisInvalidUsageMsg)`
-   + reject-second-token logic
+   - reject-second-token logic
 4. Write `TestParseStockAnalysisCommand` — table-driven (`t.Parallel()` for pure-function tests)
-5. Write `TestRouting_SA_DoesNotTrigger_StockHandler` — confirms `!sa AAPL` not picked up by `!s`/`!s ` registrations
+5. Write `TestRouting_SA_DoesNotTrigger_StockHandler` — confirms `!sa AAPL` not picked up by `!s`/`!s` registrations
 6. Run existing stock tests to confirm no regression: `mise run test`
 7. Run `mise run test-race`
 

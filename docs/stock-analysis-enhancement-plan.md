@@ -22,6 +22,7 @@ Upgrade the `!sa SYMBOL` command from a flat summary to a deeper, sectioned anal
 > **Non-normative notice:** Sections containing concrete implementation details
 > (function signatures, test names, line counts, Go code blocks) are design
 > guidance that may drift from the final code. Authoritative references live in:
+>
 > - `internal/bot/stock_analysis.go` — handler, analyzer, prompt, sanitizers
 > - `internal/bot/stock_fundamentals.go` — Finnhub fundamentals fetchers
 > - `internal/bot/bot.go` — initialization, rate limiter, handler registration
@@ -29,6 +30,7 @@ Upgrade the `!sa SYMBOL` command from a flat summary to a deeper, sectioned anal
 ## Current State (v3)
 
 The `!sa` pipeline feeds Gemini:
+
 - **Quote** (7 price fields: current, change, %, high, low, open, prev close)
 - **Profile** (name, market cap, industry, exchange)
 - **Exa news** (5 web highlights with titles, URLs, dates)
@@ -796,6 +798,7 @@ call with a comparative prompt. Estimated ~400 LOC.
 
 The watchlist is the moat: `!sa watch AAPL`, `!sa unwatch AAPL`, and
 `!sa watchlist`, stored against `chat_id`. It unlocks:
+
 - **Daily/weekly digest** (cron via background goroutine) — "Your watchlist this week: AAPL +2.3%, MSFT -0.8%"
 - **Earnings pings** via Finnhub `/calendar/earnings` — "AAPL reports Thursday after close"
 - **Significant-move alerts** — ±5% daily on watched tickers triggers a chat message

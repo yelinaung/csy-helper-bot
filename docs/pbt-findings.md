@@ -24,18 +24,22 @@ mode.
   false, so they accidentally produce `UpsidePct = 0` and are safe — but
   `+Inf` is not.
 - **Repro output:**
-  ```
+
+  ```text
   UpsidePct = +Inf  isInf=true  isNaN=false
   BUG CONFIRMED: UpsidePct is non-finite; json.Marshal would error.
   TargetMean=-Inf -> UpsidePct=0  isInf=false  isNaN=false
   TargetMean=NaN  -> UpsidePct=0  isInf=false  isNaN=false
   ```
+
   And `json.Marshal` of any struct containing `+Inf`/`-Inf`/`NaN`:
-  ```
+
+  ```text
   v=+Inf  err=json: unsupported value: +Inf
   v=-Inf  err=json: unsupported value: -Inf
   v=NaN   err=json: unsupported value: NaN
   ```
+
 - **Why the existing test misses it:** `FuzzPriceTargetUpsidePct`
   (`fuzz_test.go:415`) asserts `!IsInf` and that `json.Marshal` succeeds, but
   Go's native fuzzer rarely generates `+Inf` from `float64` bit-flipping.
@@ -115,11 +119,13 @@ mode.
   `hasMentionBoundaries` is called with wrong indices, and the match is
   rejected.
 - **Repro output:**
-  ```
+
+  ```text
   capital-sharp-s prefix ok=false  mention=""  suffix=""
   capital-I-dot prefix   ok=false  mention=""  suffix=""
   ascii baseline         ok=true   mention="@csy_helper_dev_bot"  suffix=""
   ```
+
 - **Why the existing test misses it:** `FuzzMentionAndSuffixAtEntity` and
   `FuzzShouldHandleAskMention` (`fuzz_test.go:56`, `:77`) operate on the
   entity-based path (`mentionAndSuffixAtEntity`), which uses
@@ -142,19 +148,23 @@ mode.
   The caller surfaces this to the user as "try again in 15s" for a 10s
   window.
 - **Root cause:**
+
   ```go
   retryAfter := r.window - now.Sub(entry.windowStart)
   retryAfter = max(retryAfter, 0)
   ```
+
   `max(..., 0)` floors but does not cap. If `now` is before
   `entry.windowStart`, `now.Sub(...)` is negative and `retryAfter` becomes
   `window + |skew|`.
 - **Repro output:**
-  ```
+
+  ```text
   second at t0: ok=false retry=10s
   clock-skew third: ok=false retry=15s  window=10s  retry>window=true
   BUG CONFIRMED: retryAfter (15s) > window (10s) on backwards clock.
   ```
+
 - **Why the existing test misses it:** `TestMemoryRateLimiterAllow` and
   the sweep tests always move time forward. No current test injects a
   backwards clock.
@@ -179,13 +189,15 @@ mode.
   `strings.ReplaceAll(text, "\x00", "")` calls that the markdown path
   performs.
 - **Repro output:**
-  ```
+
+  ```text
   in  = "hello\x00world\xff bad"
   plainTelegramMarkdownText: nul=true  validUTF8=false  out="hello\x00world\xff bad"
   formatTelegramMarkdown:    nul=false validUTF8=true
   BUG: plainTelegramMarkdownText leaks NUL byte
   BUG: plainTelegramMarkdownText leaks invalid UTF-8
   ```
+
 - **Why the existing test misses it:** `FuzzFormatAndNormalizeMarkdown`
   (`fuzz_test.go:375`) asserts the no-NUL / valid-UTF-8 contract for
   `formatTelegramMarkdown` (lines 392-397) but never exercises
@@ -199,10 +211,12 @@ mode.
   inconsistent.
 - **Fix:** Apply the same sanitization at the top of
   `plainTelegramMarkdownText`:
+
   ```go
   text = strings.ToValidUTF8(text, "�")
   text = strings.ReplaceAll(text, "\x00", "")
   ```
+
   Better, factor the sanitize-prelude into a shared helper both formatters
   call so they can't drift again.
 
@@ -225,6 +239,7 @@ each tier is by expected value.
 - **Model:** A `map[string]modelEntry` where `modelEntry{windowStart time.Time;
   count int}`. In Go Hegel, rule methods take exactly one `hegel.TestCase`
   parameter; values are drawn inside the rule body, not passed as arguments.
+
   ```go
   // RuleAllow increments or resets a key's window.
   func (m *rateLimiterMachine) RuleAllow(tc hegel.TestCase) {
@@ -246,6 +261,7 @@ each tier is by expected value.
       m.pruneModel(now)
   }
   ```
+
 - **Invariants:**
   - `0 <= retryAfter <= r.window` (fails today → bug 3).
   - A key just reset (new window) has `count == 1` in the subject.
@@ -254,7 +270,7 @@ each tier is by expected value.
 - **API:** `hegel.RunStateful(ht, machine)`. See the Go reference's
   stateful-testing section.
 - **Generator notes:** Draw `now` as `baseTime + hegel.Integers(-3600, 3600)
-  * time.Second` so the clock moves both ways. Draw `key` from
+  - time.Second` so the clock moves both ways. Draw `key` from
   `hegel.SampledFrom([]string{"a","b","c","d"})` so collisions happen
   often enough to exercise the increment path.
 
@@ -293,6 +309,7 @@ each tier is by expected value.
   one, `mentionAndSuffixFromText(text, mention)` returns
   `(mention, suffix, true)`.
 - **Generator:** Build the text inline:
+
   ```go
   mention := hegel.Draw(ht, hegel.Just("@csy_helper_dev_bot"))
   prefix  := hegel.Draw(ht, hegel.Text().MaxSize(20))
@@ -300,6 +317,7 @@ each tier is by expected value.
   ht.Assume(!strings.HasSuffix(prefix, "_") && /* etc. */)
   text := prefix + mention + suffix
   ```
+
   Use full `hegel.Text()` (not ASCII) so `İ`, `ẞ`, combining marks, and
   emoji all appear.
 - **Commutativity add-on:** The result should not depend on bytes before

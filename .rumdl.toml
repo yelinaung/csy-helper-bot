@@ -1,0 +1,3 @@
+[global]
+# Line length is intentionally not enforced.
+disable = ["MD013"]

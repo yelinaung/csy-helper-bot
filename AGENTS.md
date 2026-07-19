@@ -5,12 +5,12 @@
 - **Go version**: 1.26+
 - **Build**: `mise build`
 - **Test**:
-    - `mise run test` for unit tests
-    - `mise run test-race` to run go tests with race detection
+  - `mise run test` for unit tests
+  - `mise run test-race` to run go tests with race detection
 - **Lint**:
-    - `mise run lint` to run Go vet and golangci-lint
+  - `mise run lint` to run Go vet and golangci-lint
 - **Clean**:
-    - `mise run clean` to remove build and coverage artifacts
+  - `mise run clean` to remove build and coverage artifacts
 - `grep` is an alias to `rg`.
 
 ## Code Style Guidelines
@@ -32,6 +32,7 @@
 - **Comments**: End comments in periods unless comments are at the end of the line.
 
 ALWAYS RUN these `mise run` commands:
+
 - test
 - test-race
 - test-integration
@@ -41,33 +42,37 @@ ENSURE that the test coverage stays at or above 50% (CI enforced).
 ## Test Patterns
 
 ### Unit Tests
+
 - Use `t.Parallel()` for tests that don't need database.
 - Use table-driven tests for pure functions.
 - Use `testify/require` for assertions.
 - Use `t.Helper()` in test setup functions.
 
 ### Database Tests
+
 - Use `database.TestDB(t)` which skips if `TEST_DATABASE_URL` not set.
 - Run with `-p 1` to avoid race conditions.
 - Do NOT use `t.Parallel()` for database tests.
 
 ### Mocking External Dependencies
+
 - Use interfaces for external SDK calls (e.g., Gemini API).
 - Use adapter pattern to wrap SDK structs.
 - Create separate constructors for testing (e.g., `NewClientWithGenerator`).
 - See `internal/bot/mocks/` for Telegram bot mocks.
 
 ### Handler Testing
+
 - Handlers take concrete `*bot.Bot` type, not interface.
 - Use wrapper functions to test handler logic without calling real handlers.
 - Callback handlers use `EditMessageText` instead of `SendMessage`.
 
 ### Edge Cases to Test
+
 - nil/empty slices and maps.
 - Whitespace-only inputs.
 - Bot mention formats in commands.
 - Non-existent IDs for update/delete operations.
-
 
 ## Formatting
 
@@ -81,7 +86,7 @@ ENSURE that the test coverage stays at or above 50% (CI enforced).
 ## Committing
 
 - ALWAYS run both unit and integraton tests before pushing
-    - Especially, the fail tests with `mise test-integration 2&>1 | grep -w 'FAIL:'`
+  - Especially, the fail tests with `mise test-integration 2&>1 | grep -w 'FAIL:'`
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
 - ALWAYS run pre-commits before pushing
 - Try to keep commits to one line, not including your attribution. Only use
@@ -89,17 +94,18 @@ ENSURE that the test coverage stays at or above 50% (CI enforced).
 - Push to all remotes with `mise push-all`.
 
 ## Working on the TUI (UI)
+
 Anytime you starts the work, read the AGENTS.md file
 
-
 <!-- rtk-instructions v2 -->
-# RTK (Rust Token Killer) - Token-Optimized Commands
+## RTK (Rust Token Killer) - Token-Optimized Commands
 
-## Golden Rule
+### Golden Rule
 
 **Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
 
 **Important**: Even in command chains with `&&`, use `rtk`:
+
 ```bash
 # ❌ Wrong
 git add . && git commit -m "msg" && git push
@@ -108,9 +114,10 @@ git add . && git commit -m "msg" && git push
 rtk git add . && rtk git commit -m "msg" && rtk git push
 ```
 
-## RTK Commands by Workflow
+### RTK Commands by Workflow
 
-### Build & Compile (80-90% savings)
+#### Build & Compile (80-90% savings)
+
 ```bash
 rtk cargo build         # Cargo build output
 rtk cargo check         # Cargo check output
@@ -121,7 +128,8 @@ rtk prettier --check    # Files needing format only (70%)
 rtk next build          # Next.js build with route metrics (87%)
 ```
 
-### Test (90-99% savings)
+#### Test (90-99% savings)
+
 ```bash
 rtk cargo test          # Cargo test failures only (90%)
 rtk vitest run          # Vitest failures only (99.5%)
@@ -129,7 +137,8 @@ rtk playwright test     # Playwright failures only (94%)
 rtk test <cmd>          # Generic test wrapper - failures only
 ```
 
-### Git (59-80% savings)
+#### Git (59-80% savings)
+
 ```bash
 rtk git status          # Compact status
 rtk git log             # Compact log (works with all git flags)
@@ -147,7 +156,8 @@ rtk git worktree        # Compact worktree
 
 Note: Git passthrough works for ALL subcommands, even those not explicitly listed.
 
-### GitHub (26-87% savings)
+#### GitHub (26-87% savings)
+
 ```bash
 rtk gh pr view <num>    # Compact PR view (87%)
 rtk gh pr checks        # Compact PR checks (79%)
@@ -156,7 +166,8 @@ rtk gh issue list       # Compact issue list (80%)
 rtk gh api              # Compact API responses (26%)
 ```
 
-### JavaScript/TypeScript Tooling (70-90% savings)
+#### JavaScript/TypeScript Tooling (70-90% savings)
+
 ```bash
 rtk pnpm list           # Compact dependency tree (70%)
 rtk pnpm outdated       # Compact outdated packages (80%)
@@ -166,7 +177,8 @@ rtk npx <cmd>           # Compact npx command output
 rtk prisma              # Prisma without ASCII art (88%)
 ```
 
-### Files & Search (60-75% savings)
+#### Files & Search (60-75% savings)
+
 ```bash
 rtk ls <path>           # Tree format, compact (65%)
 rtk read <file>         # Code reading with filtering (60%)
@@ -174,7 +186,8 @@ rtk grep <pattern>      # Search grouped by file (75%)
 rtk find <pattern>      # Find grouped by directory (70%)
 ```
 
-### Analysis & Debug (70-90% savings)
+#### Analysis & Debug (70-90% savings)
+
 ```bash
 rtk err <cmd>           # Filter errors only from any command
 rtk log <file>          # Deduplicated logs with counts
@@ -185,7 +198,8 @@ rtk summary <cmd>       # Smart summary of command output
 rtk diff                # Ultra-compact diffs
 ```
 
-### Infrastructure (85% savings)
+#### Infrastructure (85% savings)
+
 ```bash
 rtk docker ps           # Compact container list
 rtk docker images       # Compact image list
@@ -194,13 +208,15 @@ rtk kubectl get         # Compact resource list
 rtk kubectl logs        # Deduplicated pod logs
 ```
 
-### Network (65-70% savings)
+#### Network (65-70% savings)
+
 ```bash
 rtk curl <url>          # Compact HTTP responses (70%)
 rtk wget <url>          # Compact download output (65%)
 ```
 
-### Meta Commands
+#### Meta Commands
+
 ```bash
 rtk gain                # View token savings statistics
 rtk gain --history      # View command history with savings
@@ -210,7 +226,7 @@ rtk init                # Add RTK instructions to CLAUDE.md
 rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 ```
 
-## Token Savings Overview
+### Token Savings Overview
 
 | Category | Commands | Typical Savings |
 |----------|----------|-----------------|

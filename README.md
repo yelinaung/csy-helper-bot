@@ -25,7 +25,8 @@ When the question or the quoted message contains Burmese, the bot answers in Bur
 4. Get an [Exa](https://exa.ai/) API key for web search (the `!sa` command requires it)
 5. (Optional) Get a [Parallel](https://parallel.ai/) API key so answers about current events draw on fresh web search results
 6. Create a `.env` file:
-   ```
+
+   ```text
    TELEGRAM_BOT_TOKEN=your_token_here
    FINNHUB_API_KEY=your_finnhub_key_here
    DATABENTO_API_KEY=your_databento_key_here
@@ -73,7 +74,9 @@ When the question or the quoted message contains Burmese, the bot answers in Bur
    # Optional: dump to stdout instead of OTLP (local debugging)
    # OTEL_EXPORTER=stdout
    ```
+
 7. Run the bot:
+
    ```bash
    go run ./cmd/csy-helper-bot
    ```
@@ -176,12 +179,16 @@ If the bot misses mentions in a group, disable Group Privacy Mode via [@BotFathe
 Telegram allows only one long-polling connection per bot token. This error means a second instance is polling with the same token.
 
 **Solutions:**
+
 1. Stop any local bot instances before deploying
 2. Ensure only one container is running on Dokku:
+
    ```bash
    dokku ps:scale csy-helper-bot web=1
    ```
+
 3. If the error persists during deploys, disable zero-downtime checks:
+
    ```bash
    dokku checks:disable csy-helper-bot web
    ```

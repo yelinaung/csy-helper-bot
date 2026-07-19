@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+	"unicode"
 	"unicode/utf8"
 
+	dbn_hist "github.com/NimbleMarkets/dbn-go/hist"
 	"github.com/go-telegram/bot/models"
 	"google.golang.org/genai"
 )
@@ -817,6 +822,399 @@ func FuzzNormalizeSearchPlan(f *testing.F) {
 		// Property: a non-empty objective guarantees at least one query.
 		if plan.Objective != "" && len(plan.SearchQueries) == 0 {
 			t.Fatal("non-empty objective must yield at least one query")
+		}
+	})
+}
+
+// FuzzExtractFixedXLinks verifies that rewritten tweet links:
+//   - are capped at maxXLinksPerMessage
+//   - are deduplicated
+//   - use only the fixupx.com / fxtwitter.com proxy hosts
+//   - keep a /status/<digits> path with no query, fragment, or whitespace
+func FuzzExtractFixedXLinks(f *testing.F) {
+	f.Add("check https://x.com/user/status/12345 lol")
+	f.Add("https://twitter.com/a/status/999?s=20&t=abc")
+	f.Add("see https://www.x.com/b/status/1). and https://mobile.twitter.com/c/status/2,")
+	f.Add("https://x.com/profile and https://example.com/x/status/1")
+	f.Add("dup https://x.com/a/status/1 https://x.com/a/status/1")
+	f.Add("no links here")
+
+	f.Fuzz(func(t *testing.T, text string) {
+		links := extractFixedXLinks(text)
+
+		// Property: capped at maxXLinksPerMessage.
+		if len(links) > maxXLinksPerMessage {
+			t.Fatalf("got %d links, max %d", len(links), maxXLinksPerMessage)
+		}
+
+		seen := make(map[string]struct{}, len(links))
+		for _, l := range links {
+			// Property: deduplicated.
+			if _, dup := seen[l]; dup {
+				t.Fatalf("duplicate link %q", l)
+			}
+			seen[l] = struct{}{}
+
+			// Property: only known proxy hosts.
+			if !strings.HasPrefix(l, "https://fixupx.com/") &&
+				!strings.HasPrefix(l, "https://fxtwitter.com/") {
+				t.Fatalf("link %q does not start with expected proxy host", l)
+			}
+
+			// Property: keeps the /status/<digits> path.
+			if !xStatusPathRegexp.MatchString(l) {
+				t.Fatalf("link %q missing /status/<digits>", l)
+			}
+
+			// Property: query and fragment are dropped.
+			if strings.ContainsAny(l, "?#") {
+				t.Fatalf("link %q contains query or fragment", l)
+			}
+
+			// Property: no whitespace survives.
+			if strings.IndexFunc(l, unicode.IsSpace) >= 0 {
+				t.Fatalf("link %q contains whitespace", l)
+			}
+		}
+	})
+}
+
+// FuzzMentionAndSuffixFromText verifies that a successful match:
+//   - returns mention+suffix as a suffix of the original text (byte-exact)
+//   - returns a mention whose lowercase form equals the lowercased target
+//   - never returns an empty mention
+//   - respects Telegram username boundaries on both sides
+func FuzzMentionAndSuffixFromText(f *testing.F) {
+	f.Add("hey @csy_helper_dev_bot ask hi", "@csy_helper_dev_bot")
+	f.Add("@CSY_HELPER_DEV_BOT ask x", "@csy_helper_dev_bot")
+	f.Add("ẞfoo @bot bar", "@bot")
+	f.Add("textmention@botx", "@bot")
+	f.Add("", "@bot")
+	f.Add("no mention here", "@csy_helper_dev_bot")
+
+	f.Fuzz(func(t *testing.T, text, target string) {
+		mention, suffix, ok := mentionAndSuffixFromText(text, target)
+		if !ok {
+			return
+		}
+
+		// Property: mention is never empty on success.
+		if mention == "" {
+			t.Fatal("empty mention on successful match")
+		}
+
+		// Property: mention+suffix is a byte-exact suffix of text.
+		joined := mention + suffix
+		if !strings.HasSuffix(text, joined) {
+			t.Fatalf("mention+suffix %q is not a suffix of text %q", joined, text)
+		}
+
+		// Property: mention case-folds to the target.
+		if !strings.EqualFold(mention, target) {
+			t.Fatalf("mention %q does not case-fold to target %q", mention, target)
+		}
+
+		// Property: the byte before the match is not a username char.
+		start := len(text) - len(joined)
+		if start > 0 && isTelegramUsernameChar(text[start-1]) {
+			t.Fatalf("match preceded by username char in %q", text)
+		}
+
+		// Property: the byte after the mention is not a username char.
+		end := len(text) - len(suffix)
+		if end < len(text) && isTelegramUsernameChar(text[end]) {
+			t.Fatalf("mention followed by username char in %q", text)
+		}
+	})
+}
+
+// FuzzStripAskPrefix verifies that the stripped question:
+//   - is always trimmed of surrounding whitespace
+//   - is never longer (in bytes) than the input
+//   - is empty when the input is exactly "ask" (any case)
+//   - is the trimmed input unchanged when there is no ask prefix
+func FuzzStripAskPrefix(f *testing.F) {
+	f.Add("ask what is this")
+	f.Add("ASK mutex?")
+	f.Add("ask")
+	f.Add("Ask")
+	f.Add("  ask  ")
+	f.Add("askk")
+	f.Add("some question")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, in string) {
+		out := stripAskPrefix(in)
+
+		// Property: output is trimmed.
+		if out != strings.TrimSpace(out) {
+			t.Fatalf("stripAskPrefix(%q) = %q, not trimmed", in, out)
+		}
+
+		// Property: output never grows past the input.
+		if len(out) > len(in) {
+			t.Fatalf("stripAskPrefix(%q) = %q, longer than input", in, out)
+		}
+
+		trimmed := strings.TrimSpace(in)
+		lower := strings.ToLower(trimmed)
+
+		// Property: a bare "ask" yields an empty question.
+		if lower == "ask" && out != "" {
+			t.Fatalf("stripAskPrefix(%q) = %q, want empty", in, out)
+		}
+
+		// Property: without an ask prefix the trimmed input is returned as-is.
+		if lower != "ask" && !strings.HasPrefix(lower, "ask ") && out != trimmed {
+			t.Fatalf("stripAskPrefix(%q) = %q, want %q (no ask prefix)", in, out, trimmed)
+		}
+	})
+}
+
+// FuzzParseStockCommand verifies that a successfully parsed !s command:
+//   - returns an uppercase symbol matching symbolRegex
+//   - returns days of 0 or one of the supported range values
+//   - round-trips through its canonical "!s SYMBOL" form
+func FuzzParseStockCommand(f *testing.F) {
+	f.Add("!s AAPL")
+	f.Add("!s AAPL 7d")
+	f.Add("!s BRK.A 90d")
+	f.Add("!s aapl 30D")
+	f.Add("!s")
+	f.Add("!s AAPL 1d")
+	f.Add("!s AAPL extra token")
+	f.Add("aapl")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, text string) {
+		symbol, days, err := parseStockCommand(text)
+		if err != nil {
+			return
+		}
+
+		// Property: symbol matches the validation regex.
+		if !symbolRegex.MatchString(symbol) {
+			t.Fatalf("parseStockCommand(%q) symbol %q fails symbolRegex", text, symbol)
+		}
+
+		// Property: symbol is uppercase.
+		if symbol != strings.ToUpper(symbol) {
+			t.Fatalf("parseStockCommand(%q) symbol %q not uppercase", text, symbol)
+		}
+
+		// Property: days is 0 or a supported range value.
+		if days != 0 {
+			supported := false
+			for _, d := range stockRangeDays {
+				if days == d {
+					supported = true
+					break
+				}
+			}
+			if !supported {
+				t.Fatalf("parseStockCommand(%q) days %d not in stockRangeDays", text, days)
+			}
+		}
+
+		// Property: the canonical form reparses to the same symbol, no range.
+		canonical, canonicalDays, canonicalErr := parseStockCommand("!s " + symbol)
+		if canonicalErr != nil {
+			t.Fatalf("canonical !s %q failed to parse: %v", symbol, canonicalErr)
+		}
+		if canonical != symbol || canonicalDays != 0 {
+			t.Fatalf("canonical parse = (%q, %d), want (%q, 0)", canonical, canonicalDays, symbol)
+		}
+	})
+}
+
+// FuzzParseStockAnalysisCommand verifies that a successfully parsed !sa
+// command returns an uppercase symbol matching symbolRegex and round-trips
+// through its canonical "!sa SYMBOL" form.
+func FuzzParseStockAnalysisCommand(f *testing.F) {
+	f.Add("!sa AAPL")
+	f.Add("!sa BRK.A")
+	f.Add("!sa nvda")
+	f.Add("!sa AAPL 7d")
+	f.Add("!sa")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, text string) {
+		symbol, err := parseStockAnalysisCommand(text)
+		if err != nil {
+			return
+		}
+
+		// Property: symbol matches the validation regex.
+		if !symbolRegex.MatchString(symbol) {
+			t.Fatalf("parseStockAnalysisCommand(%q) symbol %q fails symbolRegex", text, symbol)
+		}
+
+		// Property: symbol is uppercase.
+		if symbol != strings.ToUpper(symbol) {
+			t.Fatalf("parseStockAnalysisCommand(%q) symbol %q not uppercase", text, symbol)
+		}
+
+		// Property: the canonical form reparses to the same symbol.
+		canonical, canonicalErr := parseStockAnalysisCommand("!sa " + symbol)
+		if canonicalErr != nil {
+			t.Fatalf("canonical !sa %q failed to parse: %v", symbol, canonicalErr)
+		}
+		if canonical != symbol {
+			t.Fatalf("canonical parse = %q, want %q", canonical, symbol)
+		}
+	})
+}
+
+// FuzzNormalizePort verifies the full oracle: valid in-range port strings
+// canonicalize through strconv.Itoa, everything else falls back to "5000".
+func FuzzNormalizePort(f *testing.F) {
+	f.Add("8080")
+	f.Add("")
+	f.Add("5000")
+	f.Add("0")
+	f.Add("65535")
+	f.Add("65536")
+	f.Add("-1")
+	f.Add("abc")
+	f.Add(" 8080")
+	f.Add("05000")
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		got := normalizePort(raw)
+
+		// Property: output is always a valid in-range port string.
+		p, err := strconv.Atoi(got)
+		if err != nil || p < 1 || p > 65535 {
+			t.Fatalf("normalizePort(%q) = %q, not a valid port", raw, got)
+		}
+
+		// Property: full oracle against the spec.
+		want := "5000"
+		if v, convErr := strconv.Atoi(raw); convErr == nil && v >= 1 && v <= 65535 {
+			want = strconv.Itoa(v)
+		}
+		if got != want {
+			t.Fatalf("normalizePort(%q) = %q, want %q", raw, got, want)
+		}
+	})
+}
+
+// FuzzTryAdjustRangeFromDatabento422 verifies that the 422 retry adjustment:
+//   - never adjusts when the status is not 422
+//   - only succeeds for positive day windows
+//   - yields midnight-UTC-aligned start/end with start before end
+//   - yields a window no larger than the requested day count
+func FuzzTryAdjustRangeFromDatabento422(f *testing.F) {
+	f.Add(422, `{"detail":{"case":"data_end_after_available_end","payload":{"available_start":"2025-01-01T00:00:00Z","available_end":"2025-06-01T12:34:56Z"}}}`, 30)
+	f.Add(422, `{"detail":{"case":"data_schema_not_fully_available","payload":{"available_end":"2025-06-01T00:00:00Z"}}}`, 7)
+	f.Add(400, `{"detail":{"case":"data_end_after_available_end","payload":{"available_end":"2025-06-01T00:00:00Z"}}}`, 30)
+	f.Add(422, `not json`, 30)
+	f.Add(422, `{"detail":{"case":"other_case","payload":{}}}`, 90)
+	f.Add(422, `{"detail":{"case":"data_end_after_available_end","payload":{"available_end":"2025-06-01T00:00:00Z"}}}`, 0)
+
+	f.Fuzz(func(t *testing.T, statusCode int, body string, days int) {
+		params := &dbn_hist.SubmitJobParams{
+			DateRange: dbn_hist.DateRange{
+				Start: time.Date(2025, 5, 1, 0, 0, 0, 0, time.UTC),
+				End:   time.Date(2025, 6, 10, 0, 0, 0, 0, time.UTC),
+			},
+		}
+		err := &httpStatusError{StatusCode: statusCode, Status: "status", Body: body}
+
+		adjusted, ok := tryAdjustRangeFromDatabento422(params, err, days)
+
+		// Property: never adjusts for non-422 statuses.
+		if statusCode != http.StatusUnprocessableEntity && ok {
+			t.Fatalf("adjusted for status %d", statusCode)
+		}
+		if !ok {
+			return
+		}
+
+		// Property: adjustment only succeeds for positive day windows.
+		if days < 1 {
+			t.Fatalf("adjusted with days %d", days)
+		}
+
+		// Property: start is strictly before end.
+		if !adjusted.DateRange.Start.Before(adjusted.DateRange.End) {
+			t.Fatalf("start %v not before end %v", adjusted.DateRange.Start, adjusted.DateRange.End)
+		}
+
+		// Property: both bounds are midnight-UTC aligned.
+		if !adjusted.DateRange.End.Equal(adjusted.DateRange.End.UTC().Truncate(24 * time.Hour)) {
+			t.Fatalf("end %v not midnight-UTC aligned", adjusted.DateRange.End)
+		}
+		if !adjusted.DateRange.Start.Equal(adjusted.DateRange.Start.UTC().Truncate(24 * time.Hour)) {
+			t.Fatalf("start %v not midnight-UTC aligned", adjusted.DateRange.Start)
+		}
+
+		// Property: window is no larger than the requested day count.
+		if window := adjusted.DateRange.End.Sub(adjusted.DateRange.Start); window > time.Duration(days)*24*time.Hour {
+			t.Fatalf("window %v exceeds %d days", window, days)
+		}
+	})
+}
+
+// FuzzSanitizeFiniteFloat verifies that the output is always finite and
+// that finite inputs pass through unchanged.
+func FuzzSanitizeFiniteFloat(f *testing.F) {
+	f.Add(1.5)
+	f.Add(0.0)
+	f.Add(math.NaN())
+	f.Add(math.Inf(1))
+	f.Add(math.Inf(-1))
+	f.Add(math.MaxFloat64)
+	f.Add(math.SmallestNonzeroFloat64)
+
+	f.Fuzz(func(t *testing.T, v float64) {
+		got := sanitizeFiniteFloat(v)
+
+		// Property: output is never NaN or Inf.
+		if math.IsNaN(got) || math.IsInf(got, 0) {
+			t.Fatalf("sanitizeFiniteFloat(%v) = %v, not finite", v, got)
+		}
+
+		// Property: finite inputs pass through unchanged.
+		if !math.IsNaN(v) && !math.IsInf(v, 0) && got != v {
+			t.Fatalf("sanitizeFiniteFloat(%v) = %v, want unchanged", v, got)
+		}
+	})
+}
+
+// FuzzPlainTelegramMarkdownText verifies that the plain-text fallback:
+//   - contains no NUL bytes and is valid UTF-8
+//   - is always trimmed of surrounding whitespace
+//   - never grows past the input byte length (it only strips markup)
+func FuzzPlainTelegramMarkdownText(f *testing.F) {
+	f.Add("**bold** _italic_ `code`")
+	f.Add("[link](https://example.com) and ```block```")
+	f.Add("plain text")
+	f.Add("**unclosed bold")
+	f.Add("")
+	f.Add("\x00with null")
+
+	f.Fuzz(func(t *testing.T, text string) {
+		out := plainTelegramMarkdownText(text)
+
+		// Property: no NUL bytes.
+		if strings.Contains(out, "\x00") {
+			t.Fatalf("plain output contains NUL: %q (input=%q)", out, text)
+		}
+
+		// Property: valid UTF-8.
+		if !utf8.ValidString(out) {
+			t.Fatalf("plain output invalid UTF-8 (input=%q)", text)
+		}
+
+		// Property: output is trimmed.
+		if out != strings.TrimSpace(out) {
+			t.Fatalf("plain output %q not trimmed (input=%q)", out, text)
+		}
+
+		// Property: output never grows past the input.
+		if len(out) > len(text) {
+			t.Fatalf("plain output %q longer than input %q", out, text)
 		}
 	})
 }

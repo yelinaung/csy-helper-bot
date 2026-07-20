@@ -104,7 +104,10 @@ func TestPriceTargetToSanitized_AlwaysFiniteAndMarshallable(t *testing.T) {
 			!math.IsInf(targetMean, 0) && !math.IsNaN(targetMean) {
 			expected := (targetMean/effectivePrice - 1) * 100
 			if !math.IsInf(expected, 0) && !math.IsNaN(expected) {
-				if math.Abs(got.UpsidePct-expected) > 1e-9 {
+				// Relative tolerance: at magnitudes like 1e209 the float64
+				// ULP dwarfs any absolute epsilon, and codegen differences
+				// between call sites can shift the last bits.
+				if math.Abs(got.UpsidePct-expected) > 1e-9*max(1, math.Abs(expected)) {
 					ht.Fatalf("UpsidePct mismatch: got %v, want ~%v "+
 						"(mean=%v effectivePrice=%v)",
 						got.UpsidePct, expected, targetMean, effectivePrice)

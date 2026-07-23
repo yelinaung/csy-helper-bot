@@ -24,6 +24,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/ebitengine/purego v0.11.0-alpha.6.0.20260707033313-5f49e7c49322 h1:DRV0C+Y8n0cds50o0yWKHWLtfldN40JYRyPuXzSZ4Ac=
+github.com/ebitengine/purego v0.11.0-alpha.6.0.20260707033313-5f49e7c49322/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
@@ -249,5 +251,7 @@ hegel.dev/go/hegel v0.6.12 h1:DURxSpGFOfAaSM0DI9/nV8Yd6oyUnE0J+ict1SjzN2A=
 hegel.dev/go/hegel v0.6.12/go.mod h1:ZXWs2/2OdIEjaruLHU5FXmzngVljLUfvSI+WyWSBlJE=
 hegel.dev/go/hegel v0.6.13 h1:Kud6Jm/cxvp4/+CL6JqNaB++r5XyvL7ljmxXlxf1Mnk=
 hegel.dev/go/hegel v0.6.13/go.mod h1:ZXWs2/2OdIEjaruLHU5FXmzngVljLUfvSI+WyWSBlJE=
+hegel.dev/go/hegel v0.6.16 h1:hggrYwFWwkYJxIfEkGSmFmiVeQGz3NcZ9So9E6wXqbY=
+hegel.dev/go/hegel v0.6.16/go.mod h1:Dzap4DPxKrY6XXwqvgnWZLiS6uGcFbuC2lW/jJ0phRk=
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190523083050-ea95bdfd59fc/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=

@@ -17,6 +17,8 @@ A Telegram bot that posts stock quotes and charts, answers questions with Gemini
 
 When the question or the quoted message contains Burmese, the bot answers in Burmese. Each answer picks a random tone with a matching facial-expression emoji. An in-memory rate limiter caps how often users can ask.
 
+If the question or the quoted/replied message contains a link, the bot fetches the page content with [Parallel Extract](https://parallel.ai/products/extract) and grounds the answer in it — e.g. `@<bot_username> https://example.com/pricing what are the plan prices?`, or reply to a message with a link and ask `@<bot_username> summarize this`. Requires `PARALLEL_API_KEY` (the same key used for web search below).
+
 ## Setup
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token
@@ -26,60 +28,67 @@ When the question or the quoted message contains Burmese, the bot answers in Bur
 5. (Optional) Get a [Parallel](https://parallel.ai/) API key so answers about current events draw on fresh web search results
 6. Create a `.env` file:
 
-   ```text
-   TELEGRAM_BOT_TOKEN=your_token_here
-   FINNHUB_API_KEY=your_finnhub_key_here
-   DATABENTO_API_KEY=your_databento_key_here
-   # optional (defaults to EQUS.MINI)
-   DATABENTO_DATASET=EQUS.MINI
-   GEMINI_API_KEY=your_gemini_key_here
-   # optional (defaults to gemini-3.5-flash)
-   GEMINI_MODEL=gemini-3.5-flash
-   # optional (defaults to 60)
-   GEMINI_TIMEOUT_SECONDS=60
-   # Stock analysis (optional — requires GEMINI_API_KEY + EXA_API_KEY)
-   STOCK_ANALYSIS_ENABLED=true
-   EXA_API_KEY=your_exa_key_here
-   # optional (defaults to GEMINI_MODEL or gemini-3.5-flash)
-   STOCK_ANALYSIS_MODEL=gemini-3.5-flash
-   # optional (defaults to 90)
-   STOCK_ANALYSIS_TIMEOUT_SECONDS=90
-   # optional (defaults to 5 requests per 300 seconds)
-   STOCK_ANALYSIS_RATE_LIMIT_COUNT=5
-   STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS=300
-   # optional (defaults to 5, capped at 20)
-   EXA_NUM_RESULTS=5
-   # Web search for fresh-info questions (optional — requires GEMINI_API_KEY)
-   PARALLEL_API_KEY=your_parallel_key_here
-   # optional (defaults to 15)
-   PARALLEL_TIMEOUT_SECONDS=15
-   # optional (defaults to 5, capped at 10)
-   PARALLEL_MAX_RESULTS=5
-   ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
-   EXPLAIN_RATE_LIMIT_COUNT=5
-   EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
-   LOG_LEVEL=info
-   # OpenTelemetry (optional — disabled unless OTEL_ENABLED=true)
-   OTEL_ENABLED=true
-   # OTLP/HTTP endpoint (defaults to http://localhost:4318)
-   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-   # Optional: auth headers for hosted collectors
-   # OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer ...
-   # Optional: override the default service name (csy-helper-bot)
-   # OTEL_SERVICE_NAME=csy-helper-bot
-   # Optional: disable individual signals while keeping others on
-   # OTEL_TRACES_ENABLED=false
-   # OTEL_METRICS_ENABLED=false
-   # OTEL_LOGS_ENABLED=false
-   # Optional: dump to stdout instead of OTLP (local debugging)
-   # OTEL_EXPORTER=stdout
-   ```
+    ```text
+    TELEGRAM_BOT_TOKEN=your_token_here
+    FINNHUB_API_KEY=your_finnhub_key_here
+    DATABENTO_API_KEY=your_databento_key_here
+    # optional (defaults to EQUS.MINI)
+    DATABENTO_DATASET=EQUS.MINI
+    GEMINI_API_KEY=your_gemini_key_here
+    # optional (defaults to gemini-3.5-flash)
+    GEMINI_MODEL=gemini-3.5-flash
+    # optional (defaults to 60)
+    GEMINI_TIMEOUT_SECONDS=60
+    # Stock analysis (optional — requires GEMINI_API_KEY + EXA_API_KEY)
+    STOCK_ANALYSIS_ENABLED=true
+    EXA_API_KEY=your_exa_key_here
+    # optional (defaults to GEMINI_MODEL or gemini-3.5-flash)
+    STOCK_ANALYSIS_MODEL=gemini-3.5-flash
+    # optional (defaults to 90)
+    STOCK_ANALYSIS_TIMEOUT_SECONDS=90
+    # optional (defaults to 5 requests per 300 seconds)
+    STOCK_ANALYSIS_RATE_LIMIT_COUNT=5
+    STOCK_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS=300
+    # optional (defaults to 5, capped at 20)
+    EXA_NUM_RESULTS=5
+    # Web search for fresh-info questions (optional — requires GEMINI_API_KEY)
+    PARALLEL_API_KEY=your_parallel_key_here
+    # optional (defaults to 15)
+    PARALLEL_TIMEOUT_SECONDS=15
+    # optional (defaults to 5, capped at 10)
+    PARALLEL_MAX_RESULTS=5
+    # URL extraction inside @bot questions (optional — requires PARALLEL_API_KEY)
+    # optional (defaults to true when PARALLEL_API_KEY is set; kill switch)
+    EXTRACT_ENABLED=true
+    # optional (defaults to 30)
+    EXTRACT_TIMEOUT_SECONDS=30
+    # optional (defaults to 3, capped at 10)
+    EXTRACT_MAX_URLS=3
+    ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
+    EXPLAIN_RATE_LIMIT_COUNT=5
+    EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
+    LOG_LEVEL=info
+    # OpenTelemetry (optional — disabled unless OTEL_ENABLED=true)
+    OTEL_ENABLED=true
+    # OTLP/HTTP endpoint (defaults to http://localhost:4318)
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+    # Optional: auth headers for hosted collectors
+    # OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer ...
+    # Optional: override the default service name (csy-helper-bot)
+    # OTEL_SERVICE_NAME=csy-helper-bot
+    # Optional: disable individual signals while keeping others on
+    # OTEL_TRACES_ENABLED=false
+    # OTEL_METRICS_ENABLED=false
+    # OTEL_LOGS_ENABLED=false
+    # Optional: dump to stdout instead of OTLP (local debugging)
+    # OTEL_EXPORTER=stdout
+    ```
 
 7. Run the bot:
 
-   ```bash
-   go run ./cmd/csy-helper-bot
-   ```
+    ```bash
+    go run ./cmd/csy-helper-bot
+    ```
 
 ## Access Control
 
@@ -183,12 +192,12 @@ Telegram allows only one long-polling connection per bot token. This error means
 1. Stop any local bot instances before deploying
 2. Ensure only one container is running on Dokku:
 
-   ```bash
-   dokku ps:scale csy-helper-bot web=1
-   ```
+    ```bash
+    dokku ps:scale csy-helper-bot web=1
+    ```
 
 3. If the error persists during deploys, disable zero-downtime checks:
 
-   ```bash
-   dokku checks:disable csy-helper-bot web
-   ```
+    ```bash
+    dokku checks:disable csy-helper-bot web
+    ```

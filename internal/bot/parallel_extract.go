@@ -47,6 +47,16 @@ type parallelExtractResult struct {
 	Excerpts    []string `json:"excerpts"`
 }
 
+// toPromptWebResult satisfies webResultLike (see gemini_explainer.go).
+func (r parallelExtractResult) toPromptWebResult() promptWebResult {
+	return promptWebResult{
+		Title:       r.Title,
+		URL:         r.URL,
+		PublishDate: r.PublishDate,
+		Excerpts:    r.Excerpts,
+	}
+}
+
 // parallelExtractError matches the documented v1 ExtractError schema
 // (https://docs.parallel.ai/api-reference/extract/extract). A response
 // struct without this field silently discards per-URL failures via

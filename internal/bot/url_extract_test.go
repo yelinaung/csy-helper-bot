@@ -344,6 +344,10 @@ func TestNormalizeExtractURL(t *testing.T) {
 		{"loopback IP rejected", "http://127.0.0.1", "", false},
 		{"private IP rejected", "http://10.0.0.5", "", false},
 		{"link-local IP rejected", "http://169.254.1.1", "", false},
+		{"IPv6 loopback rejected", "http://[::1]", "", false},
+		{"IPv6 loopback with port rejected", "http://[::1]:8080", "", false},
+		{"IPv6 private (ULA) rejected", "http://[fd00::1]", "", false},
+		{"IPv6 link-local rejected", "http://[fe80::1]", "", false},
 		{"overlong URL rejected", "https://norm.example.net/" + strings.Repeat("a", maxExtractRawURLLen), "", false},
 	}
 

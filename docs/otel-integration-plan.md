@@ -17,7 +17,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 
 ### Quick Navigation
 
-- [Goals & Non-Goals](#goals--non-goals) — what v1 does and does not do
+- [Goals & Non-Goals](#goals-non-goals) — what v1 does and does not do
 - [Current State](#current-state) — what exists today, incl. credential-in-URL map
 - [Architecture](#architecture) — package layout, data flow, lifecycle
 - [Dependencies](#dependencies) — new modules added to `go.mod`
@@ -26,7 +26,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 - [New Package: `internal/otel`](#new-package-internalotel) — Providers, exporters, sanitizer, zerolog bridge
 - [Credential Sanitization (P0)](#credential-sanitization-p0) — URL redaction before export
 - [Instrumentation](#instrumentation) — handlers, HTTP, Gemini, metrics, logs, outcome recorder
-- [Span & Metric Catalog](#span--metric-catalog) — names, attributes, units
+- [Span & Metric Catalog](#span-metric-catalog) — names, attributes, units
 - [Graceful Shutdown](#graceful-shutdown) — flush order on SIGINT
 - [Test Plan](#test-plan) — unit + in-memory exporter tests, isolation strategy
 - [Implementation Order](#implementation-order) — 6-step build sequence
@@ -79,7 +79,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 - **Profiling / exemplars** — not in v1.
 - **Handler error returns** — handlers swallow errors today; a reliable
   `result=error` metric dimension is deferred to v4 (see
-  [Outcome Recording](#outcomego--handler-outcome-recorder-p1) for the v1 `unknown` default).
+  [Outcome Recording](#outcomego-handler-outcome-recorder-p1) for the v1 `unknown` default).
 
 ## Current State
 

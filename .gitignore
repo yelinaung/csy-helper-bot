@@ -45,3 +45,5 @@ Thumbs.db
 
 # Hegel property-based testing
 .hegel/
+
+.codegraph/

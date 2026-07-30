@@ -25,20 +25,20 @@ mode.
   `+Inf` is not.
 - **Repro output:**
 
-  ```text
-  UpsidePct = +Inf  isInf=true  isNaN=false
-  BUG CONFIRMED: UpsidePct is non-finite; json.Marshal would error.
-  TargetMean=-Inf -> UpsidePct=0  isInf=false  isNaN=false
-  TargetMean=NaN  -> UpsidePct=0  isInf=false  isNaN=false
-  ```
+    ```text
+    UpsidePct = +Inf  isInf=true  isNaN=false
+    BUG CONFIRMED: UpsidePct is non-finite; json.Marshal would error.
+    TargetMean=-Inf -> UpsidePct=0  isInf=false  isNaN=false
+    TargetMean=NaN  -> UpsidePct=0  isInf=false  isNaN=false
+    ```
 
-  And `json.Marshal` of any struct containing `+Inf`/`-Inf`/`NaN`:
+    And `json.Marshal` of any struct containing `+Inf`/`-Inf`/`NaN`:
 
-  ```text
-  v=+Inf  err=json: unsupported value: +Inf
-  v=-Inf  err=json: unsupported value: -Inf
-  v=NaN   err=json: unsupported value: NaN
-  ```
+    ```text
+    v=+Inf  err=json: unsupported value: +Inf
+    v=-Inf  err=json: unsupported value: -Inf
+    v=NaN   err=json: unsupported value: NaN
+    ```
 
 - **Why the existing test misses it:** `FuzzPriceTargetUpsidePct`
   (`fuzz_test.go:415`) asserts `!IsInf` and that `json.Marshal` succeeds, but
@@ -58,47 +58,47 @@ mode.
   does not guarantee a finite result. Guard the **result**, not just the
   inputs, and coerce non-finite pass-through fields to 0 at copy time:
 
-  ```go
-  // import "math"  // add to imports — stock_analysis.go does not import it
-  sanitizeFloat := func(f float64) float64 {
+    ```go
+    // import "math"  // add to imports — stock_analysis.go does not import it
+    sanitizeFloat := func(f float64) float64 {
       if math.IsInf(f, 0) || math.IsNaN(f) {
           return 0
       }
       return f
-  }
-  spt := &sanitizedPriceTarget{
+    }
+    spt := &sanitizedPriceTarget{
       TargetHigh:   sanitizeFloat(pt.TargetHigh),
       TargetLow:    sanitizeFloat(pt.TargetLow),
       TargetMean:   sanitizeFloat(pt.TargetMean),
       TargetMedian: sanitizeFloat(pt.TargetMedian),
       CurrentPrice: sanitizeFloat(currentPrice),
-  }
-  if currentPrice > 0 && pt.TargetMean > 0 {
+    }
+    if currentPrice > 0 && pt.TargetMean > 0 {
       up := (pt.TargetMean/currentPrice - 1) * 100
       if !math.IsInf(up, 0) && !math.IsNaN(up) {
           spt.UpsidePct = up
       }
-  }
-  ```
+    }
+    ```
 
-  Rationale for each check:
-  - `sanitizeFloat` on the pass-through fields: those have no `> 0` guard,
+    Rationale for each check:
+    - `sanitizeFloat` on the pass-through fields: those have no `> 0` guard,
     so `NaN`, `+Inf`, and `-Inf` all reach `json.Marshal` and must be
     coerced.
-  - `> 0` on `currentPrice` and `pt.TargetMean`: excludes `NaN` and `-Inf`
+    - `> 0` on `currentPrice` and `pt.TargetMean`: excludes `NaN` and `-Inf`
     (both compare false to `> 0`), so only finite positive values (plus
     `+Inf`, which `sanitizeFloat` already handled on the pass-through) reach
     the division.
-  - `!math.IsInf(up, 0) && !math.IsNaN(up)` on the **result**: catches the
+    - `!math.IsInf(up, 0) && !math.IsNaN(up)` on the **result**: catches the
     overflow-to-`+Inf` case from huge-but-finite inputs. `IsNaN` on the
     result is technically unreachable when both operands are finite and
     `> 0`, but it's cheap insurance and keeps the code honestly matching
     the "always finite" property asserted by opportunity #2 below —
     without it, the PBT and the fix disagree.
 
-  Consider applying the same `sanitizeFloat` helper to every float that
-  flows into `analysisPromptPayload` (`sanitizedQuote`,
-  `sanitizedMetrics`, `sanitizedProfile.MarketCapB`).
+    Consider applying the same `sanitizeFloat` helper to every float that
+    flows into `analysisPromptPayload` (`sanitizedQuote`,
+    `sanitizedMetrics`, `sanitizedProfile.MarketCapB`).
 
 ### Bug 2 — `mentionAndSuffixFromText` misses mentions after case-shifting chars
 
@@ -112,19 +112,19 @@ mode.
   `strings.ToLower`, searches for the lowercase mention in `lowerText`,
   then maps the byte offsets back into the original `text`.
   `strings.ToLower` is **not byte-length-preserving**:
-  - `ẞ` U+1E9E (3 bytes) → `ß` U+00DF (2 bytes)
-  - `İ` U+0130 (2 bytes) → `i̇` (3 bytes, combining dot)
+    - `ẞ` U+1E9E (3 bytes) → `ß` U+00DF (2 bytes)
+    - `İ` U+0130 (2 bytes) → `i̇` (3 bytes, combining dot)
 
-  After the shift, `text[start:end]` no longer aligns with the mention,
-  `hasMentionBoundaries` is called with wrong indices, and the match is
-  rejected.
+    After the shift, `text[start:end]` no longer aligns with the mention,
+    `hasMentionBoundaries` is called with wrong indices, and the match is
+    rejected.
 - **Repro output:**
 
-  ```text
-  capital-sharp-s prefix ok=false  mention=""  suffix=""
-  capital-I-dot prefix   ok=false  mention=""  suffix=""
-  ascii baseline         ok=true   mention="@csy_helper_dev_bot"  suffix=""
-  ```
+    ```text
+    capital-sharp-s prefix ok=false  mention=""  suffix=""
+    capital-I-dot prefix   ok=false  mention=""  suffix=""
+    ascii baseline         ok=true   mention="@csy_helper_dev_bot"  suffix=""
+    ```
 
 - **Why the existing test misses it:** `FuzzMentionAndSuffixAtEntity` and
   `FuzzShouldHandleAskMention` (`fuzz_test.go:56`, `:77`) operate on the
@@ -149,21 +149,21 @@ mode.
   window.
 - **Root cause:**
 
-  ```go
-  retryAfter := r.window - now.Sub(entry.windowStart)
-  retryAfter = max(retryAfter, 0)
-  ```
+    ```go
+    retryAfter := r.window - now.Sub(entry.windowStart)
+    retryAfter = max(retryAfter, 0)
+    ```
 
-  `max(..., 0)` floors but does not cap. If `now` is before
-  `entry.windowStart`, `now.Sub(...)` is negative and `retryAfter` becomes
-  `window + |skew|`.
+    `max(..., 0)` floors but does not cap. If `now` is before
+    `entry.windowStart`, `now.Sub(...)` is negative and `retryAfter` becomes
+    `window + |skew|`.
 - **Repro output:**
 
-  ```text
-  second at t0: ok=false retry=10s
-  clock-skew third: ok=false retry=15s  window=10s  retry>window=true
-  BUG CONFIRMED: retryAfter (15s) > window (10s) on backwards clock.
-  ```
+    ```text
+    second at t0: ok=false retry=10s
+    clock-skew third: ok=false retry=15s  window=10s  retry>window=true
+    BUG CONFIRMED: retryAfter (15s) > window (10s) on backwards clock.
+    ```
 
 - **Why the existing test misses it:** `TestMemoryRateLimiterAllow` and
   the sweep tests always move time forward. No current test injects a
@@ -190,13 +190,13 @@ mode.
   performs.
 - **Repro output:**
 
-  ```text
-  in  = "hello\x00world\xff bad"
-  plainTelegramMarkdownText: nul=true  validUTF8=false  out="hello\x00world\xff bad"
-  formatTelegramMarkdown:    nul=false validUTF8=true
-  BUG: plainTelegramMarkdownText leaks NUL byte
-  BUG: plainTelegramMarkdownText leaks invalid UTF-8
-  ```
+    ```text
+    in  = "hello\x00world\xff bad"
+    plainTelegramMarkdownText: nul=true  validUTF8=false  out="hello\x00world\xff bad"
+    formatTelegramMarkdown:    nul=false validUTF8=true
+    BUG: plainTelegramMarkdownText leaks NUL byte
+    BUG: plainTelegramMarkdownText leaks invalid UTF-8
+    ```
 
 - **Why the existing test misses it:** `FuzzFormatAndNormalizeMarkdown`
   (`fuzz_test.go:375`) asserts the no-NUL / valid-UTF-8 contract for
@@ -212,13 +212,13 @@ mode.
 - **Fix:** Apply the same sanitization at the top of
   `plainTelegramMarkdownText`:
 
-  ```go
-  text = strings.ToValidUTF8(text, "�")
-  text = strings.ReplaceAll(text, "\x00", "")
-  ```
+    ```go
+    text = strings.ToValidUTF8(text, "�")
+    text = strings.ReplaceAll(text, "\x00", "")
+    ```
 
-  Better, factor the sanitize-prelude into a shared helper both formatters
-  call so they can't drift again.
+    Better, factor the sanitize-prelude into a shared helper both formatters
+    call so they can't drift again.
 
 ## Hegel PBT opportunities
 
@@ -240,9 +240,9 @@ each tier is by expected value.
   count int}`. In Go Hegel, rule methods take exactly one `hegel.TestCase`
   parameter; values are drawn inside the rule body, not passed as arguments.
 
-  ```go
-  // RuleAllow increments or resets a key's window.
-  func (m *rateLimiterMachine) RuleAllow(tc hegel.TestCase) {
+    ```go
+    // RuleAllow increments or resets a key's window.
+    func (m *rateLimiterMachine) RuleAllow(tc hegel.TestCase) {
       key := hegel.Draw(tc, hegel.SampledFrom([]string{"a","b","c","d"}))
       now := m.baseTime.Add(time.Duration(hegel.Draw(tc, hegel.Integers(-3600, 3600))) * time.Second)
       ok, retry := m.subject.allow(key, now)
@@ -250,27 +250,27 @@ each tier is by expected value.
       if !m.agrees(key, ok, retry) {
           panic("subject and model disagree")
       }
-  }
+    }
 
-  // RuleSweep prunes expired entries.
-  func (m *rateLimiterMachine) RuleSweep(tc hegel.TestCase) {
+    // RuleSweep prunes expired entries.
+    func (m *rateLimiterMachine) RuleSweep(tc hegel.TestCase) {
       now := m.baseTime.Add(time.Duration(hegel.Draw(tc, hegel.Integers(-3600, 3600))) * time.Second)
       m.subject.mu.Lock()
       m.subject.sweepLocked(now)
       m.subject.mu.Unlock()
       m.pruneModel(now)
-  }
-  ```
+    }
+    ```
 
 - **Invariants:**
-  - `0 <= retryAfter <= r.window` (fails today → bug 3).
-  - A key just reset (new window) has `count == 1` in the subject.
-  - `len(r.data) <= rateLimitMaxMapSize` after any rule.
-  - Subject and model agree on `(ok, retryAfter, count)` after every rule.
+    - `0 <= retryAfter <= r.window` (fails today → bug 3).
+    - A key just reset (new window) has `count == 1` in the subject.
+    - `len(r.data) <= rateLimitMaxMapSize` after any rule.
+    - Subject and model agree on `(ok, retryAfter, count)` after every rule.
 - **API:** `hegel.RunStateful(ht, machine)`. See the Go reference's
   stateful-testing section.
 - **Generator notes:** Draw `now` as `baseTime + hegel.Integers(-3600, 3600)
-  - time.Second` so the clock moves both ways. Draw `key` from
+    - time.Second` so the clock moves both ways. Draw `key` from
   `hegel.SampledFrom([]string{"a","b","c","d"})` so collisions happen
   often enough to exercise the increment path.
 
@@ -281,17 +281,17 @@ each tier is by expected value.
   `hegel.Floats[float64]()` (Inf/NaN included by default). Catches bug 1
   on the first run.
 - **Properties:**
-  - `UpsidePct` is always finite (`!IsNaN && !IsInf`).
-  - `json.Marshal(priceTargetToSanitized(pt, cp))` never errors (covers
+    - `UpsidePct` is always finite (`!IsNaN && !IsInf`).
+    - `json.Marshal(priceTargetToSanitized(pt, cp))` never errors (covers
     both `UpsidePct` and the pass-through `TargetHigh`/`Low`/`Mean`/
     `Median`/`CurrentPrice` fields, which the fix in Bug 1 coerces via
     `sanitizeFloat`).
-  - When `currentPrice > 0 && TargetMean > 0`, both are finite, and the
+    - When `currentPrice > 0 && TargetMean > 0`, both are finite, and the
     quotient `(TargetMean/currentPrice - 1) * 100` is itself finite,
     `UpsidePct` equals that quotient within float tolerance. When the
     quotient overflows to `+Inf` (e.g. `MaxFloat64 / SmallestNonzeroFloat64`),
     `UpsidePct` is 0 — the result guard drops it.
-  - Nil pointer returns nil.
+    - Nil pointer returns nil.
 - **Generalize:** The same finiteness-and-marshal property applies to
   every float field that flows into `analysisPromptPayload`:
   `sanitizeMetrics`, `sanitizedQuote`, `sanitizedProfile.MarketCapB`.
@@ -310,16 +310,16 @@ each tier is by expected value.
   `(mention, suffix, true)`.
 - **Generator:** Build the text inline:
 
-  ```go
-  mention := hegel.Draw(ht, hegel.Just("@csy_helper_dev_bot"))
-  prefix  := hegel.Draw(ht, hegel.Text().MaxSize(20))
-  suffix  := hegel.Draw(ht, hegel.Text().MaxSize(20))
-  ht.Assume(!strings.HasSuffix(prefix, "_") && /* etc. */)
-  text := prefix + mention + suffix
-  ```
+    ```go
+    mention := hegel.Draw(ht, hegel.Just("@csy_helper_dev_bot"))
+    prefix  := hegel.Draw(ht, hegel.Text().MaxSize(20))
+    suffix  := hegel.Draw(ht, hegel.Text().MaxSize(20))
+    ht.Assume(!strings.HasSuffix(prefix, "_") && /* etc. */)
+    text := prefix + mention + suffix
+    ```
 
-  Use full `hegel.Text()` (not ASCII) so `İ`, `ẞ`, combining marks, and
-  emoji all appear.
+    Use full `hegel.Text()` (not ASCII) so `İ`, `ẞ`, combining marks, and
+    emoji all appear.
 - **Commutativity add-on:** The result should not depend on bytes before
   the mention. Generate two prefixes of equal "boundary class" and assert
   the function returns the same `mention` and `suffix`.
@@ -348,20 +348,20 @@ each tier is by expected value.
 #### 5. Idempotence PBT for `sanitizeForPrompt` and the `sanitize*Results` functions
 
 - **Targets:**
-  - `sanitizeForPrompt` (`gemini_explainer.go:578`)
-  - `sanitizeExaResults` (`exa_search.go:166`)
-  - `sanitizeParallelResults` (`parallel_search.go:154`)
+    - `sanitizeForPrompt` (`gemini_explainer.go:578`)
+    - `sanitizeExaResults` (`exa_search.go:166`)
+    - `sanitizeParallelResults` (`parallel_search.go:154`)
 - **Why:** All three are normalization functions. Idempotence
   (`f(f(x)) == f(x)`) is the cheapest, highest-signal property for
   normalizers and is not currently asserted for any of them.
 - **Properties:**
-  - `sanitizeForPrompt(sanitizeForPrompt(s, n), n) ==
+    - `sanitizeForPrompt(sanitizeForPrompt(s, n), n) ==
     sanitizeForPrompt(s, n)` for all `s` and all `n >= 0`.
-  - `sanitizeExaResults(sanitizeExaResults(rs)) ==
+    - `sanitizeExaResults(sanitizeExaResults(rs)) ==
     sanitizeExaResults(rs)`.
-  - Same for `sanitizeParallelResults`.
-  - Output is always valid UTF-8 with no NUL bytes.
-  - Per-field rune budgets hold after sanitization.
+    - Same for `sanitizeParallelResults`.
+    - Output is always valid UTF-8 with no NUL bytes.
+    - Per-field rune budgets hold after sanitization.
 - **Generators:** `hegel.Text()` for strings; for result slices, build
   `[]exaSearchResult` inline with `hegel.Text()` fields and
   `hegel.Lists(hegel.Text())` for highlights/excerpts.
@@ -372,14 +372,14 @@ each tier is by expected value.
 - **Why:** The existing table-driven tests cover fixed examples. A PBT
   covers the full symbol grammar and arbitrary junk inputs.
 - **Properties:**
-  - For any symbol matching `^[A-Z0-9.\-]{1,10}$` (generate with
+    - For any symbol matching `^[A-Z0-9.\-]{1,10}$` (generate with
     `hegel.FromRegex("[A-Z0-9.\\-]{1,10}", true)` then uppercase),
     `parseStockCommand("!s " + sym)` returns `(sym, 0, nil)`.
-  - For any valid symbol and range in `{7d, 30d, 60d, 90d}`,
+    - For any valid symbol and range in `{7d, 30d, 60d, 90d}`,
     `parseStockCommand("!s " + sym + " " + range)` returns
     `(sym, days[range], nil)`.
-  - `parseStockAnalysisCommand("!sa " + sym)` returns `(sym, nil)`.
-  - No-crash: for arbitrary `hegel.Text()` input, neither parser panics.
+    - `parseStockAnalysisCommand("!sa " + sym)` returns `(sym, nil)`.
+    - No-crash: for arbitrary `hegel.Text()` input, neither parser panics.
 - **Generator:** Use `hegel.FromRegex` for valid symbols and
   `hegel.Text()` for the junk-input case.
 
@@ -389,10 +389,10 @@ each tier is by expected value.
 - **Why:** Round-trip with arbitrary whitespace and ordering is the
   actual contract; the existing test only checks two fixed inputs.
 - **Properties:**
-  - For any `[]int64` `ids`, join with `", "` plus arbitrary surrounding
+    - For any `[]int64` `ids`, join with `", "` plus arbitrary surrounding
     whitespace per token; `parseAllowedGroupIDs(joined)` returns a map
     whose key set equals `ids` (order-independent, duplicates collapse).
-  - No-crash: arbitrary `hegel.Text()` never panics and returns either a
+    - No-crash: arbitrary `hegel.Text()` never panics and returns either a
     map or an error.
 - **Generator:** `hegel.Lists(hegel.Integers[int64](math.MinInt64,
   math.MaxInt64)).MaxSize(10)` for the id list; `hegel.Text().Alphabet("
@@ -404,10 +404,10 @@ each tier is by expected value.
 
 - **Target:** `internal/bot/ask.go:316`.
 - **Properties:**
-  - `f(a, b) == f(b, a)` (commutativity over the variadic args).
-  - `f(a) ⇒ f(a, anything)` (adding more text can't flip a true result
+    - `f(a, b) == f(b, a)` (commutativity over the variadic args).
+    - `f(a) ⇒ f(a, anything)` (adding more text can't flip a true result
     to false).
-  - `f(a) == f(a, a)` (idempotence).
+    - `f(a) == f(a, a)` (idempotence).
 - **Generator:** `hegel.Text()` for each arg. Include Myanmar-block
   codepoints via `hegel.Text().IncludeCharacters("\u1000\u109f")` in some
   cases, or just rely on full-Unicode `Text()` to occasionally produce
@@ -417,9 +417,9 @@ each tier is by expected value.
 
 - **Target:** `internal/bot/stock.go:527`.
 - **Properties:**
-  - `End.Sub(Start) == days * 24 * time.Hour` for all `days` in `[1, 90]`.
-  - `End == now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)`.
-  - `Start.Before(End)`.
+    - `End.Sub(Start) == days * 24 * time.Hour` for all `days` in `[1, 90]`.
+    - `End == now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)`.
+    - `Start.Before(End)`.
 - **Generator:** `hegel.Integers(1, 90)` for `days` plus boundary values
   (`0`, `1`, `90`, `91`, `-1`) via `hegel.OneOf`. Draw `now` from
   `hegel.Datetimes()` to exercise time zones.
@@ -427,16 +427,16 @@ each tier is by expected value.
 #### 10. Env-parser bounds contracts
 
 - **Targets:**
-  - `loadExaNumResults` (`exa_search.go:190`) — output in `[1, 20]`.
-  - `loadParallelMaxResults` (`parallel_search.go:194`) — output in
+    - `loadExaNumResults` (`exa_search.go:190`) — output in `[1, 20]`.
+    - `loadParallelMaxResults` (`parallel_search.go:194`) — output in
     `[1, 10]`.
-  - `loadParallelTimeout` (`parallel_search.go:180`) — output `> 0`.
-  - `normalizePort` (`bot.go:157`) — output `"5000"` or a valid port
+    - `loadParallelTimeout` (`parallel_search.go:180`) — output `> 0`.
+    - `normalizePort` (`bot.go:157`) — output `"5000"` or a valid port
     string in `[1, 65535]`.
-  - `loadAnalysisTimeout` / `loadAnalysisMaxOutputTokens`
+    - `loadAnalysisTimeout` / `loadAnalysisMaxOutputTokens`
     (`stock_analysis.go:218`, `:233`) — either a value `> 0` or a clean
     error; never panic.
-  - `loadExplainRateLimiter` / `loadAnalysisRateLimiter`
+    - `loadExplainRateLimiter` / `loadAnalysisRateLimiter`
     (`rate_limiter.go:87`, `bot.go:446`) — `limit > 0`, `window > 0`.
 - **Property:** For arbitrary `hegel.Text()` input, the output is always
   in the documented range (or a clean error for the error-returning
@@ -449,11 +449,11 @@ each tier is by expected value.
 
 - **Target:** `internal/bot/xlink.go:75`.
 - **Properties:**
-  - Output is deduplicated.
-  - `len(output) <= maxXLinksPerMessage` (5).
-  - Every entry starts with `https://fixupx.com/` or
+    - Output is deduplicated.
+    - `len(output) <= maxXLinksPerMessage` (5).
+    - Every entry starts with `https://fixupx.com/` or
     `https://fxtwitter.com/` and contains `/status/[0-9]+`.
-  - Output is a subsequence of the rewritten input matches (order
+    - Output is a subsequence of the rewritten input matches (order
     preserved).
 - **Generator:** Build `text` by splicing arbitrary prose
   (`hegel.Text()`) around N generated tweet URLs. Generate tweet URLs
@@ -476,9 +476,9 @@ above so existing entries keep their numbers; tier is noted inline.
   `formatTelegramMarkdown` — the plain path's sibling — but never calls
   the plain path.
 - **Properties:**
-  - `utf8.ValidString(plainTelegramMarkdownText(s))` for all `s`.
-  - `!strings.Contains(plainTelegramMarkdownText(s), "\x00")`.
-  - Consistency: feed the same `s` to both formatters; both outputs are
+    - `utf8.ValidString(plainTelegramMarkdownText(s))` for all `s`.
+    - `!strings.Contains(plainTelegramMarkdownText(s), "\x00")`.
+    - Consistency: feed the same `s` to both formatters; both outputs are
     NUL-free and valid UTF-8.
 - **Generator:** `hegel.Text()` plus inputs that splice in NUL and invalid
   UTF-8 bytes — draw `hegel.Binary(0, 50)` segments and interleave them
@@ -515,12 +515,12 @@ above so existing entries keep their numbers; tier is noted inline.
   strings and small floats, so it **never enters the drop loop** — it
   checks nonce/marker/footer but never the budget contract or the cascade.
 - **Properties:**
-  - No-crash / always-marshals when droppable fields are huge — draw large
+    - No-crash / always-marshals when droppable fields are huge — draw large
     `hegel.Lists(...)` for `NewsItems` and large `Metrics`.
-  - Cascade terminates and is monotone: each iteration strictly shrinks
+    - Cascade terminates and is monotone: each iteration strictly shrinks
     `payloadJSON` until `<= maxPromptTotalRuneLen` (6000) or hits the
     `break` at line 456.
-  - **Documents a real limitation:** the cascade only drops
+    - **Documents a real limitation:** the cascade only drops
     price-target/recommendation/earnings/metrics/news; a giant `Symbol` or
     `Profile.Name` is *not* droppable, so the prompt can exceed 6000 runes
     via the `break` path. A PBT that draws a large `profileName` and
@@ -536,8 +536,8 @@ above so existing entries keep their numbers; tier is noted inline.
 
 - **Target:** `internal/bot/gemini_explainer.go:230`.
 - **Properties:**
-  - `len(toPromptWebResults(rs)) <= len(rs)` (structural).
-  - No-crash on arbitrary `[]parallelSearchResult`.
+    - `len(toPromptWebResults(rs)) <= len(rs)` (structural).
+    - No-crash on arbitrary `[]parallelSearchResult`.
 - **Budget caveat:** `toPromptWebResults` only copies fields — per-field
   rune budgets are enforced by `sanitizeParallelResults`
   (`parallel_search.go:154`) upstream. A budget property must target
@@ -557,8 +557,8 @@ above so existing entries keep their numbers; tier is noted inline.
   contract violation, not a bug.
 - **Properties:** For any non-nil `*LeetCodeQuestion` with arbitrary
   field values:
-  - Never panics.
-  - If it routes through Telegram markdown, output is NUL-free and valid
+    - Never panics.
+    - If it routes through Telegram markdown, output is NUL-free and valid
     UTF-8 (same safety contract as bug 4).
 - **Generator:** build `LeetCodeQuestion` inline with `hegel.Text()`
   fields; draw `Difficulty` from `hegel.SampledFrom([]string{"Easy",
@@ -597,10 +597,8 @@ inline `hegel.Draw` calls.
 
 Hegel is not in `go.mod` and `.hegel/` is not in `.gitignore`. To start:
 
-```bash
-go get hegel.dev/go/hegel@latest
-echo ".hegel/" >> .gitignore
-```
+    go get hegel.dev/go/hegel@latest
+    echo ".hegel/" >> .gitignore
 
 Hegel persists failing examples to `.hegel/` and replays them on
 subsequent runs; in CI the database is auto-disabled. No other config is

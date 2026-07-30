@@ -927,7 +927,7 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 1. Extract `extractSymbolToken(text, prefix, usageMsg)` helper from `parseStockCommand`
 2. Refactor `parseStockCommand` to call `extractSymbolToken(text, "!s", invalidUsageSymbol)` internally
 3. Implement `parseStockAnalysisCommand` calling `extractSymbolToken(text, "!sa", analysisInvalidUsageMsg)`
-   - reject-second-token logic
+    - reject-second-token logic
 4. Write `TestParseStockAnalysisCommand` — table-driven (`t.Parallel()` for pure-function tests)
 5. Write `TestRouting_SA_DoesNotTrigger_StockHandler` — confirms `!sa AAPL` not picked up by `!s`/`!s` registrations
 6. Run existing stock tests to confirm no regression: `mise run test`
@@ -937,10 +937,10 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 
 1. Define types: `exaSearchRequest`, `exaSearchResponse`, `exaSearchResult`
 2. Implement:
-   - `searchStockNews()` — cache check, HTTP POST, parse, cost log, store in cache
-   - `buildStockSearchQuery()` — query builder
-   - `sanitizeExaResults()` — per-field sanitization with rune budgets
-   - Cache logic (`exaCacheMu`, `exaCacheTTL`, `cachedExaResults`)
+    - `searchStockNews()` — cache check, HTTP POST, parse, cost log, store in cache
+    - `buildStockSearchQuery()` — query builder
+    - `sanitizeExaResults()` — per-field sanitization with rune budgets
+    - Cache logic (`exaCacheMu`, `exaCacheTTL`, `cachedExaResults`)
 3. Write tests using `httptest.NewServer` + `t.Setenv("EXA_API_KEY", ...)`
 4. Write `TestSanitizeExaResults_*` tests for invalid UTF-8, truncation, NUL bytes
 5. Write cache hit/expiry tests
@@ -963,10 +963,10 @@ Tests that mock Gemini use `geminiContentGenerator` interface — same pattern a
 ### Step 3: Handler + Bot Registration
 
 1. Implement `stockAnalysisHandler()`:
-   - `parseStockAnalysisCommand` → `stockAnalyzerInstance == nil` gate → blocked check → rate limit
-   - Loading message → fetch quote (blocking) → fetch profile (fault-tolerant, continue on error)
-   - `searchStockNews` → `sanitizeExaResults` → `exaResultsToHighlights`
-   - `analyzer.analyze()` → `sendOrEditAnalysisResult`
+    - `parseStockAnalysisCommand` → `stockAnalyzerInstance == nil` gate → blocked check → rate limit
+    - Loading message → fetch quote (blocking) → fetch profile (fault-tolerant, continue on error)
+    - `searchStockNews` → `sanitizeExaResults` → `exaResultsToHighlights`
+    - `analyzer.analyze()` → `sendOrEditAnalysisResult`
 2. Add `initStockAnalyzer()`, `loadAnalysisRateLimiter()` in `bot.go`
 3. Register `!sa` handler in `Run()` — **no outer env check**, `initStockAnalyzer` is sole gate
 4. Update `/help` text

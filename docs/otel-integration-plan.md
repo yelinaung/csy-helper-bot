@@ -87,35 +87,35 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
   `cmd/csy-helper-bot/main.go` with a `ConsoleWriter` (human-readable, JSON
   internally). No structured telemetry export.
 - **Handlers** registered in `internal/bot/bot.go:Run`:
-  - `startHandler` (`/start`), `helpHandler` (`/help`), `lcHandler` (`/lc`, `!lc`)
-  - `stockHandler` (`!s`, `!s `), `stockAnalysisHandler` (`!sa`, `!sa `)
-  - `askHandler` (mention match), `photoAskHandler` (photo + mention)
-  - `xLinkHandler` (x.com/twitter.com link rewrite)
-  - Default handler for unmatched updates
-  - All registered handlers are wrapped by `requestLoggingMiddleware`
+    - `startHandler` (`/start`), `helpHandler` (`/help`), `lcHandler` (`/lc`, `!lc`)
+    - `stockHandler` (`!s`, `!s `), `stockAnalysisHandler` (`!sa`, `!sa `)
+    - `askHandler` (mention match), `photoAskHandler` (photo + mention)
+    - `xLinkHandler` (x.com/twitter.com link rewrite)
+    - Default handler for unmatched updates
+    - All registered handlers are wrapped by `requestLoggingMiddleware`
     (`internal/bot/bot.go:171`), which logs the incoming update and enforces
     the group allowlist before dispatching.
 - **External calls** (instrumentation targets) with **credential location**:
 
-  | Service | Function | Transport | Client | Secret in URL? |
-  |---|---|---|---|---|
-  | Finnhub quote | `fetchStockQuote` (`stock.go:339`) | HTTP GET | `httpClient` (10s) | **Yes** — `token=` query |
-  | Finnhub profile | `fetchCompanyProfile` (`stock.go:381`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
-  | Finnhub metrics | `fetchFinancialMetrics` (`stock_fundamentals.go:103`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
-  | Finnhub earnings | `fetchEarningsHistory` (`stock_fundamentals.go:143`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
-  | Finnhub recommendation | `fetchRecommendation` (`stock_fundamentals.go:184`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
-  | Finnhub price-target | `fetchPriceTarget` (`stock_fundamentals.go:228`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
-  | Databento | `getHistoricalRangeWithContext` (`stock.go:537`) | HTTP POST | `histHTTPClient` (30s) | No — Basic auth header |
-  | LeetCode | `fetchDailyLeetCode` (`leetcode.go:66`) | HTTP POST (GraphQL) | `httpClient` | No — public endpoint |
-  | Exa | `searchStockNews` (`exa_search.go:68`) | HTTP POST | `httpClient` | No — `x-api-key` header |
-  | Parallel | `parallelSearcher.search` (`parallel_search.go:88`) | HTTP POST | `parallelHTTPClient` | No — `x-api-key` header |
-  | Telegram photo | `downloadTelegramPhoto` (`ask.go:545`) | HTTP GET | `httpClient` | **Yes** — `bot<TOKEN>` in path |
-  | Gemini explain/ask | `geminiExplainer` `doExplain` (`gemini_explainer.go:336`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
-  | Gemini classify | `classifySearchNeed` (`freshness_classifier.go:42`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
-  | Gemini analyze | `stockAnalyzer.analyze` (`stock_analysis.go`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
+    | Service | Function | Transport | Client | Secret in URL? |
+    |---|---|---|---|---|
+    | Finnhub quote | `fetchStockQuote` (`stock.go:339`) | HTTP GET | `httpClient` (10s) | **Yes** — `token=` query |
+    | Finnhub profile | `fetchCompanyProfile` (`stock.go:381`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
+    | Finnhub metrics | `fetchFinancialMetrics` (`stock_fundamentals.go:103`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
+    | Finnhub earnings | `fetchEarningsHistory` (`stock_fundamentals.go:143`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
+    | Finnhub recommendation | `fetchRecommendation` (`stock_fundamentals.go:184`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
+    | Finnhub price-target | `fetchPriceTarget` (`stock_fundamentals.go:228`) | HTTP GET | `httpClient` | **Yes** — `token=` query |
+    | Databento | `getHistoricalRangeWithContext` (`stock.go:537`) | HTTP POST | `histHTTPClient` (30s) | No — Basic auth header |
+    | LeetCode | `fetchDailyLeetCode` (`leetcode.go:66`) | HTTP POST (GraphQL) | `httpClient` | No — public endpoint |
+    | Exa | `searchStockNews` (`exa_search.go:68`) | HTTP POST | `httpClient` | No — `x-api-key` header |
+    | Parallel | `parallelSearcher.search` (`parallel_search.go:88`) | HTTP POST | `parallelHTTPClient` | No — `x-api-key` header |
+    | Telegram photo | `downloadTelegramPhoto` (`ask.go:545`) | HTTP GET | `httpClient` | **Yes** — `bot<TOKEN>` in path |
+    | Gemini explain/ask | `geminiExplainer` `doExplain` (`gemini_explainer.go:336`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
+    | Gemini classify | `classifySearchNeed` (`freshness_classifier.go:42`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
+    | Gemini analyze | `stockAnalyzer.analyze` (`stock_analysis.go`) | genai SDK | `generator.GenerateContent` | No — SDK-managed auth |
 
-  **7 of the 11 HTTP call sites put credentials in the URL** (6 Finnhub +
-  1 Telegram). These are the P0 sanitization targets.
+    **7 of the 11 HTTP call sites put credentials in the URL** (6 Finnhub +
+    1 Telegram). These are the P0 sanitization targets.
 - **Lifecycle**: `Run` builds a `signal.NotifyContext` for SIGINT and blocks on
   `b.Start(ctx)`. `main` calls `log.Fatal` on the returned error.
 
@@ -414,11 +414,11 @@ func newSanitizingExporter(base sdktrace.SpanExporter) sdktrace.SpanExporter
 - `Export(ctx, spans)` iterates the spans, and for each span rebuilds the
   attribute list redacting **every key in `urlAttrKeys`** (both `url.full` and
   the legacy `http.url`):
-  - Parses the URL; if a query parameter named `token`, `api_key`, `apikey`,
+    - Parses the URL; if a query parameter named `token`, `api_key`, `apikey`,
     or `key` is present, replaces its value with `<redacted>`.
-  - If the path contains a segment matching `^bot\d+:[A-Za-z0-9_-]+$`
+    - If the path contains a segment matching `^bot\d+:[A-Za-z0-9_-]+$`
     (Telegram bot token format), replaces that segment with `bot<redacted>`.
-  - If parsing fails, replaces the entire URL value with `<redacted>`
+    - If parsing fails, replaces the entire URL value with `<redacted>`
     (fail-closed).
 - Non-URL attributes pass through unchanged.
 - The span name (set by `otelhttp`'s `WithSpanNameFormatter` to
@@ -454,12 +454,12 @@ func (w *otelLogWriter) Write(p []byte) (int, error)
   splits on newlines and decodes each line with `encoding/json`.
 - Field mapping:
 
-  | zerolog JSON key | OTel log record field |
-  |---|---|
-  | `time` | `Record.Timestamp` |
-  | `level` | `Record.Severity` (map: trace→TRACE, debug→DEBUG, info→INFO, warn→WARN, error→ERROR, fatal→FATAL, panic→FATAL) |
-  | `message` | `Record.Body` (StringValue) |
-  | every other key | `Record.Attributes` (best-effort type inference: number→Float64, bool→Bool, string→String, object/array→String of raw JSON) |
+    | zerolog JSON key | OTel log record field |
+    |---|---|
+    | `time` | `Record.Timestamp` |
+    | `level` | `Record.Severity` (map: trace→TRACE, debug→DEBUG, info→INFO, warn→WARN, error→ERROR, fatal→FATAL, panic→FATAL) |
+    | `message` | `Record.Body` (StringValue) |
+    | every other key | `Record.Attributes` (best-effort type inference: number→Float64, bool→Bool, string→String, object/array→String of raw JSON) |
 
 - `Record.ObservedTimestamp` is set to `time.Now()` to preserve export order.
 - **Log-side URL redaction (P0, review #3):** before attaching any attribute
@@ -1028,13 +1028,13 @@ mise run lint
 2. Run `mise run run` and exercise `/lc`, `!s AAPL`, `!sa AAPL`, an `@bot`
    ask, and an x.com link.
 3. Confirm in HyperDX/Clickstack:
-   - Traces appear with handler span + child fetch/gemini spans.
-   - **No `token=` or `bot<TOKEN>` value appears in any span OR log
-     attribute** — verify this explicitly for both `url.full` and `http.url`
-     on spans and `url`/`request.url` on logs (P0 acceptance criterion).
-   - Metrics: `bot.commands.total`, `bot.command.duration`,
-     `gen_ai.client.token.usage` appear.
-   - Logs appear with correct severity and structured fields.
+    - Traces appear with handler span + child fetch/gemini spans.
+    - **No `token=` or `bot<TOKEN>` value appears in any span OR log
+    attribute** — verify this explicitly for both `url.full` and `http.url`
+    on spans and `url`/`request.url` on logs (P0 acceptance criterion).
+    - Metrics: `bot.commands.total`, `bot.command.duration`,
+    `gen_ai.client.token.usage` appear.
+    - Logs appear with correct severity and structured fields.
 4. Run `mise run test`, `mise run test-race`, `mise run lint`.
 5. Run `mise run test-integration` (once the task exists — see the note) and
    `mise test-integration 2>&1 | grep -w 'FAIL:'` per AGENTS.md before pushing.

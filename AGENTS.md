@@ -7,11 +7,11 @@
 - Use monospace commands/paths/env vars/code ids, inline examples, and literal keyword bullets by wrapping them in backticks.
 - Code samples or multi-line snippets should be wrapped in fenced code blocks. Include an info string as often as possible.
 - File References: When referencing files in your response follow the below rules:
-  - Use inline code to make file paths clickable.
-  - Prefer "fluent" linking style. That is, don't show the user the actual URL, but instead use it to add links to relevant pieces of your response. Whenever you mention a file by name, you MUST link to it in this way.
-  - To make it easy for the user to look into code you are referring to, you always link to the code with markdown links. The URL should use `file` as the scheme, the absolute path to the file as the path, and an optional fragment with the line range. Always URL-encode special characters in file paths (spaces become `%20`, parentheses become `%28` and `%29`, etc.).
-  - Do not use URIs like file://, vscode://, or <https://>.
-  - Examples: User asks for a link to `~/src/app/routes/(app)/threads/+page.svelte` → respond with `[~/src/app/routes/(app)/threads/+page.svelte](file:///Users/bob/src/app/routes/%28app%29/threads/+page.svelte)`. Referencing code locations → "The auth logic is in [auth.js](file:///Users/alice/project/config/auth.js#L15-L23) and the handler is in [login.js](file:///Users/alice/project/routes/login.js#L128-L145)"
+    - Use inline code to make file paths clickable.
+    - Prefer "fluent" linking style. That is, don't show the user the actual URL, but instead use it to add links to relevant pieces of your response. Whenever you mention a file by name, you MUST link to it in this way.
+    - To make it easy for the user to look into code you are referring to, you always link to the code with markdown links. The URL should use `file` as the scheme, the absolute path to the file as the path, and an optional fragment with the line range. Always URL-encode special characters in file paths (spaces become `%20`, parentheses become `%28` and `%29`, etc.).
+    - Do not use URIs like file://, vscode://, or <https://>.
+    - Examples: User asks for a link to `~/src/app/routes/(app)/threads/+page.svelte` → respond with `[~/src/app/routes/(app)/threads/+page.svelte](file:///Users/bob/src/app/routes/%28app%29/threads/+page.svelte)`. Referencing code locations → "The auth logic is in [auth.js](file:///Users/alice/project/config/auth.js#L15-L23) and the handler is in [login.js](file:///Users/alice/project/routes/login.js#L128-L145)"
 - Don’t use emojis.
 
 ## Presenting your work
@@ -47,10 +47,10 @@
 - Try to use apply_patch for single file edits, only when you repeatedly struggle with the same edit, you can try another way to edit.
 - Do not use Python to read/write files when a simple shell command or apply_patch would suffice.
 - You may be in a dirty git worktree.
-  - NEVER revert existing changes you did not make unless explicitly requested, since these changes were made by the user.
-  - If asked to make a commit or code edits and there are unrelated changes to your work or changes that you didn't make in those files, don't revert those changes.
-  - If the changes are in files you've touched recently, you should read carefully and understand how you can work with the changes rather than reverting them.
-  - If the changes are in unrelated files, just ignore them and don't revert them, don't mention them to the user. There can be multiple agents working in the same codebase.
+    - NEVER revert existing changes you did not make unless explicitly requested, since these changes were made by the user.
+    - If asked to make a commit or code edits and there are unrelated changes to your work or changes that you didn't make in those files, don't revert those changes.
+    - If the changes are in files you've touched recently, you should read carefully and understand how you can work with the changes rather than reverting them.
+    - If the changes are in unrelated files, just ignore them and don't revert them, don't mention them to the user. There can be multiple agents working in the same codebase.
 - Do not amend a commit unless explicitly requested to do so.
 - **NEVER** use destructive commands like `git reset --hard` or `git checkout --` unless specifically requested or approved by the user.
 - You struggle using the git interactive console. **ALWAYS** prefer using non-interactive git commands.
@@ -62,12 +62,12 @@
 - **Go version**: 1.26+
 - **Build**: `mise build`
 - **Test**:
-  - `mise run test` for unit tests
-  - `mise run test-race` to run go tests with race detection
+    - `mise run test` for unit tests
+    - `mise run test-race` to run go tests with race detection
 - **Lint**:
-  - `mise run lint` to run Go vet and golangci-lint
+    - `mise run lint` to run Go vet and golangci-lint
 - **Clean**:
-  - `mise run clean` to remove build and coverage artifacts
+    - `mise run clean` to remove build and coverage artifacts
 - `grep` is an alias to `rg`.
 
 ### Code Style Guidelines
@@ -143,7 +143,7 @@ ENSURE that the test coverage stays at or above 50% (CI enforced).
 ### Committing
 
 - ALWAYS run both unit and integraton tests before pushing
-  - Especially, the fail tests with `mise test-integration 2&>1 | grep -w 'FAIL:'`
+    - Especially, the fail tests with `mise test-integration 2&>1 | grep -w 'FAIL:'`
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
 - ALWAYS run pre-commits before pushing
 - Try to keep commits to one line, not including your attribution. Only use

@@ -545,10 +545,10 @@ Current `maxPromptTotalRuneLen` is 4000 runes. Adding metrics (~400 chars JSON),
    4. Set `payload.Metrics = nil`, re-marshal, re-check budget
    5. Drop news items one at a time from the tail (existing behavior, `stock_analysis.go:243`)
 
-   Each step is a top-level assignment followed by `json.MarshalIndent` — not
-   nested loops. The flat sequence keeps the cascade easy to read and test. The current
-   implementation only drops news items; the refactor replaces that single loop
-   with the 5-stage cascade. Tests must cover each transition point.
+      Each step is a top-level assignment followed by `json.MarshalIndent` — not
+      nested loops. The flat sequence keeps the cascade easy to read and test. The current
+      implementation only drops news items; the refactor replaces that single loop
+      with the 5-stage cascade. Tests must cover each transition point.
 3. **Zero-value omission**: `omitempty` on all sanitized types keeps the payload compact — zero-valued metrics don't consume budget
 
 ```go

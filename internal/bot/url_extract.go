@@ -317,6 +317,14 @@ func normalizeExtractURL(raw string) (string, bool) {
 		return "", false
 	}
 
+	// Lowercase the host so the same page referenced with different host
+	// casing (e.g. from separate Telegram entities) dedupes to one URL —
+	// hosts are case-insensitive per RFC 3986, unlike paths and queries.
+	if lowerHost := strings.ToLower(u.Host); lowerHost != u.Host {
+		u.Host = lowerHost
+		candidate = u.String()
+	}
+
 	return candidate, true
 }
 

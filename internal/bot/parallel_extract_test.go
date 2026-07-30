@@ -126,6 +126,31 @@ func TestParallelExtractor_Non200(t *testing.T) {
 	}
 }
 
+// TestParallelExtractor_Non200_RedactsSecrets covers the non-200 response
+// body, which — like the per-URL Errors field — is upstream-controlled text
+// that could echo back a requested URL verbatim. It must go through the
+// same redaction as sanitizeExtractErrorContent before landing in the
+// returned error, since that error can reach logs via log.Warn().Err(...).
+func TestParallelExtractor_Non200_RedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	extractor := newTestParallelExtractor(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error": "invalid url https://example.com/page?token=super-secret-value"}`))
+	})
+
+	_, err := extractor.extract(context.Background(), []string{"https://example.org"}, "anything")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "super-secret-value") {
+		t.Fatalf("extract() leaked the secret token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted>") {
+		t.Errorf("extract() error = %v, want a redaction placeholder", err)
+	}
+}
+
 func TestParallelExtractor_HonorsConfiguredTimeout(t *testing.T) {
 	t.Parallel()
 

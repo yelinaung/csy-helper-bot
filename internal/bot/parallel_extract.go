@@ -170,7 +170,8 @@ func (p *parallelExtractor) extract(ctx context.Context, urls []string, objectiv
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxParallelErrorBodyBytes))
-		return nil, fmt.Errorf("parallel extract returned status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		safeBody := sanitizeExtractErrorContent(strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("parallel extract returned status %s: %s", resp.Status, safeBody)
 	}
 
 	var extractResp parallelExtractResponse

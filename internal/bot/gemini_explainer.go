@@ -234,15 +234,18 @@ func (g *geminiExplainer) explainWithSearchResults(
 	return doExplain(ctx, g, prompt, nil, tone)
 }
 
-func toPromptWebResults(results []parallelSearchResult) []promptWebResult {
+// webResultLike is satisfied by any Parallel result type (search or
+// extract) that can describe itself as a promptWebResult.
+type webResultLike interface {
+	toPromptWebResult() promptWebResult
+}
+
+// toPromptWebResults maps either Parallel result type into the shared
+// promptWebResult shape the prompt payload uses.
+func toPromptWebResults[T webResultLike](results []T) []promptWebResult {
 	webResults := make([]promptWebResult, 0, len(results))
 	for _, r := range results {
-		webResults = append(webResults, promptWebResult{
-			Title:       r.Title,
-			URL:         r.URL,
-			PublishDate: r.PublishDate,
-			Excerpts:    r.Excerpts,
-		})
+		webResults = append(webResults, r.toPromptWebResult())
 	}
 	return webResults
 }
@@ -290,26 +293,13 @@ func (g *geminiExplainer) explainWithExtractResults(
 		Question:            sanitizedQuestion,
 		LanguageInstruction: languageInstruction,
 		Tone:                tone,
-		WebResults:          toPromptWebResultsFromExtract(results),
+		WebResults:          toPromptWebResults(results),
 	})
 	if err != nil {
 		return "", err
 	}
 
 	return doExplain(ctx, g, prompt, nil, tone)
-}
-
-func toPromptWebResultsFromExtract(results []parallelExtractResult) []promptWebResult {
-	webResults := make([]promptWebResult, 0, len(results))
-	for _, r := range results {
-		webResults = append(webResults, promptWebResult{
-			Title:       r.Title,
-			URL:         r.URL,
-			PublishDate: r.PublishDate,
-			Excerpts:    r.Excerpts,
-		})
-	}
-	return webResults
 }
 
 type imageInput struct {

@@ -321,7 +321,7 @@ bot has today for pasted links, so extraction only ever improves the
 experience. Never surface Parallel error bodies in chat (quota/account
 details); log them bounded to 1KB as `search()` does.
 
-Latency note: the extract- failure + search-success fallback path triggers
+Latency note: the extract failure + search-success fallback path triggers
 four model/API calls (extract → Gemini classifier → search → Gemini explain)
 — the worst-case latency of any ask path. This is acceptable for v1 because
 the extract call is fast enough that the marginal cost over a plain search

@@ -56,6 +56,16 @@ type parallelSearchResult struct {
 	Excerpts    []string `json:"excerpts"`
 }
 
+// toPromptWebResult satisfies webResultLike (see gemini_explainer.go).
+func (r parallelSearchResult) toPromptWebResult() promptWebResult {
+	return promptWebResult{
+		Title:       r.Title,
+		URL:         r.URL,
+		PublishDate: r.PublishDate,
+		Excerpts:    r.Excerpts,
+	}
+}
+
 type parallelSearchResponse struct {
 	SearchID string                 `json:"search_id"`
 	Results  []parallelSearchResult `json:"results"`

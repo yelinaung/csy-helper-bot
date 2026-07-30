@@ -193,6 +193,37 @@ func TestParallelExtractor_PerURLErrorsSkippedNotFatal(t *testing.T) {
 	}
 }
 
+// TestParallelExtractor_AllResultsFilteredBySanitization proves the exact
+// contract answerTextQuestion's zero-usable-excerpts fallback (ask.go)
+// depends on: a 200 OK response whose only results are title-only or
+// otherwise excerpt-less still yields an empty, non-nil-error slice from
+// extract() — "succeeded but nothing usable" — rather than an error. The
+// caller tells these apart by checking len(results), so extract() must
+// never turn this case into an error.
+func TestParallelExtractor_AllResultsFilteredBySanitization(t *testing.T) {
+	t.Parallel()
+
+	extractor := newTestParallelExtractor(t, func(w http.ResponseWriter, _ *http.Request) {
+		resp := parallelExtractResponse{
+			ExtractID: "extract-empty",
+			Results: []parallelExtractResult{
+				{URL: "https://example.com/title-only", Title: "Has a title but no excerpts"},
+				{URL: "https://example.com/empty"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	results, err := extractor.extract(context.Background(), []string{"https://example.com/title-only", "https://example.com/empty"}, "anything")
+	if err != nil {
+		t.Fatalf("extract() error = %v, want nil (zero usable excerpts is not an error)", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected zero usable results after sanitization, got %+v", results)
+	}
+}
+
 func TestNewParallelExtractor(t *testing.T) {
 	t.Setenv("PARALLEL_API_KEY", "  ")
 	t.Setenv("EXTRACT_ENABLED", "")

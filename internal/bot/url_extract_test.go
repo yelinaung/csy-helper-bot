@@ -275,6 +275,22 @@ func TestExtractQuestionURLs_DedupAndCap(t *testing.T) {
 	}
 }
 
+// TestExtractQuestionURLs_DedupIgnoresHostCase covers the same page
+// referenced with different host casing (plausible when it comes from
+// separate Telegram entities): normalizeExtractURL lowercases the host, so
+// these dedupe to a single URL instead of consuming the cap twice.
+func TestExtractQuestionURLs_DedupIgnoresHostCase(t *testing.T) {
+	t.Parallel()
+
+	question := "https://Dedup-Case.example.net/a https://dedup-case.EXAMPLE.NET/a summarize"
+
+	urls, _ := extractQuestionURLs(nil, question, "", 3)
+
+	if len(urls) != 1 || urls[0] != "https://dedup-case.example.net/a" {
+		t.Fatalf("urls = %v, want a single lowercased URL", urls)
+	}
+}
+
 func TestExtractQuestionURLs_QuestionURLsBeforeQuotedURLs(t *testing.T) {
 	t.Parallel()
 
@@ -336,6 +352,7 @@ func TestNormalizeExtractURL(t *testing.T) {
 		{"http passthrough", "http://norm.example.net/y", "http://norm.example.net/y", true},
 		{"bare domain gets https", "norm-bare.example.net", "https://norm-bare.example.net", true},
 		{"bare domain with path", "norm-bare2.example.net/a/b", "https://norm-bare2.example.net/a/b", true},
+		{"uppercase host lowered", "https://Norm-Case.Example.NET/A/b", "https://norm-case.example.net/A/b", true},
 		{"empty rejected", "", "", false},
 		{"whitespace only rejected", "   ", "", false},
 		{"scheme without host rejected", "https://", "", false},

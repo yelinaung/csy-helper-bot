@@ -186,7 +186,7 @@ way Parallel must never receive an empty objective, a requirement
 
 Match `parallel_search.go`'s structure exactly:
 
-- `parallelExtractor{baseURL, apiKey, timeout}` +
+- `parallelExtractor{baseURL, apiKey, timeout, maxURLs}` +
   `newParallelExtractor()` returning `nil` when `PARALLEL_API_KEY` is unset
   (feature silently off, following `newParallelSearcher()`'s own
   convention) **or when `EXTRACT_ENABLED` is explicitly false**. The

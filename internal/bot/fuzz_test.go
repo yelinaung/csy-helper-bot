@@ -826,6 +826,51 @@ func FuzzNormalizeSearchPlan(f *testing.F) {
 	})
 }
 
+// FuzzExtractQuestionURLs verifies that URL detection never panics on
+// arbitrary text/entity/quoted input — entity offsets are UTF-16 code units
+// and a known sharp edge (see FuzzUTF16EntityRangeToByteRange) — and that
+// whatever it returns respects the requested cap and is itself normalizable.
+func FuzzExtractQuestionURLs(f *testing.F) {
+	// Set so the question-side entity-filtering path (questionSuffixStart,
+	// entitiesFromByteOffset) — which only activates once a mention is
+	// configured — gets exercised too, not just the quoted/fallback paths.
+	prevMention := botMention
+	botMention = testBotMention
+	f.Cleanup(func() { botMention = prevMention })
+
+	f.Add(testBotMention+" https://example.com/a what?", len(testBotMention)+1, 21, "https://example.com/a what?", "", 3)
+	f.Add("", 0, 0, "", "", 3)
+	f.Add("😀 weird", -1, -1, "https://x", "https://y", 0)
+	f.Add("text", 100, 100, "", "", -5)
+
+	f.Fuzz(func(t *testing.T, text string, offset, length int, question, quoted string, maxURLs int) {
+		message := &models.Message{
+			Text: text,
+			Entities: []models.MessageEntity{
+				{Type: models.MessageEntityTypeURL, Offset: offset, Length: length},
+			},
+			ReplyToMessage: &models.Message{
+				Text: quoted,
+			},
+		}
+
+		urls, _ := extractQuestionURLs(message, question, quoted, maxURLs)
+
+		effectiveMax := maxURLs
+		if effectiveMax <= 0 {
+			effectiveMax = defaultExtractMaxURLs
+		}
+		if len(urls) > effectiveMax {
+			t.Fatalf("returned %d urls, exceeds requested cap %d", len(urls), effectiveMax)
+		}
+		for _, u := range urls {
+			if _, ok := normalizeExtractURL(u); !ok {
+				t.Fatalf("returned url %q does not itself pass normalizeExtractURL", u)
+			}
+		}
+	})
+}
+
 // FuzzExtractFixedXLinks verifies that rewritten tweet links:
 //   - are capped at maxXLinksPerMessage
 //   - are deduplicated

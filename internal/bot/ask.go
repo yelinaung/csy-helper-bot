@@ -124,7 +124,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	respondInBurmese := shouldRespondInBurmese(update.Message.Text, quoted)
 
-	explanation, err := answerAskQuestion(ctx, b, repliedPhoto, quoted, question, respondInBurmese)
+	explanation, err := answerAskQuestion(ctx, b, update.Message, repliedPhoto, quoted, question, respondInBurmese)
 	if errors.Is(err, errAskPhotoDownload) {
 		appotel.RecordOutcome(ctx, "error")
 		log.Error().Err(err).Msg("Failed to download replied photo")
@@ -155,12 +155,13 @@ var errAskPhotoDownload = errors.New("download replied photo")
 func answerAskQuestion(
 	ctx context.Context,
 	b *bot.Bot,
+	message *models.Message,
 	photo *models.PhotoSize,
 	quoted, question string,
 	respondInBurmese bool,
 ) (string, error) {
 	if photo == nil {
-		return answerTextQuestion(ctx, quoted, question, respondInBurmese)
+		return answerTextQuestion(ctx, message, quoted, question, respondInBurmese)
 	}
 
 	imageBytes, mimeType, err := downloadTelegramPhoto(ctx, b, photo.FileID)
@@ -173,11 +174,36 @@ func answerAskQuestion(
 	return textExplainer.explainWithImage(ctx, imageBytes, mimeType, question, respondInBurmese)
 }
 
-// answerTextQuestion answers a text-only ask request. When Parallel search is
-// configured and Gemini judges the question to need fresh web data, the answer
-// is grounded in Parallel Search excerpts. Every search-path failure falls
-// back to the plain Gemini answer so users never see a search error.
-func answerTextQuestion(ctx context.Context, quoted string, question string, respondInBurmese bool) (string, error) {
+// answerTextQuestion answers a text-only ask request. When the question or
+// quoted message references a URL and Parallel Extract is configured, the
+// answer is grounded in the extracted page content — checked first, since an
+// explicit link makes freshness classification unnecessary. Otherwise, when
+// Parallel Search is configured and Gemini judges the question to need fresh
+// web data, the answer is grounded in Parallel Search excerpts. Retrieval
+// failures on either path fall back to the plain Gemini answer so users never
+// see a retrieval error; once an extraction succeeds, though, an explainer
+// failure (blocked, timeout, ...) propagates instead of retrying ungrounded,
+// which would silently discard a safety verdict.
+func answerTextQuestion(ctx context.Context, message *models.Message, quoted string, question string, respondInBurmese bool) (string, error) {
+	if extractor := newParallelExtractor(); extractor != nil {
+		urls, strippedQuestion := extractQuestionURLs(message, question, quoted, extractor.maxURLs)
+		if len(urls) > 0 {
+			objective := extractObjectiveFor(strippedQuestion)
+			log.Info().
+				Int("url_count", len(urls)).
+				Msg("Question references URLs; running Parallel extract")
+			results, extractErr := extractor.extract(ctx, urls, objective)
+			switch {
+			case extractErr != nil:
+				log.Warn().Err(extractErr).Msg("Parallel extract failed; answering without page content")
+			case len(results) > 0:
+				return textExplainer.explainWithExtractResults(ctx, quoted, question, results, respondInBurmese)
+			default:
+				log.Warn().Msg("Parallel extract returned no usable excerpts; answering without page content")
+			}
+		}
+	}
+
 	if searcher := newParallelSearcher(); searcher != nil {
 		plan, err := textExplainer.classifySearchNeed(ctx, quoted, question)
 		switch {

@@ -26,10 +26,10 @@ No new command. This extends the existing `@bot` ask flow:
 → bare link: extracts with a generic "summarize the key points" objective
 ```
 
-This mirrors how the flow already grounds fresh-info questions in Parallel
-*Search* results (`answerTextQuestion` → `classifySearchNeed` →
-`explainWithSearchResults`). Extraction is the same pattern with a different
-retrieval source, and it reuses the same `PARALLEL_API_KEY`.
+The flow already grounds fresh-info questions in Parallel *Search* results
+(`answerTextQuestion` → `classifySearchNeed` → `explainWithSearchResults`).
+Extraction adds a second retrieval source ahead of that same path and reuses
+the same `PARALLEL_API_KEY`.
 
 ## API reference
 
@@ -96,23 +96,26 @@ classifier saves a Gemini call).
 **Scope boundary — replied photos win.** `answerAskQuestion` branches to
 image analysis whenever the replied-to message has a photo
 (`repliedPhoto != nil`), *before* `answerTextQuestion` runs. This hook lives
-inside `answerTextQuestion`, so a URL in a **photo's** caption never reaches
+inside `answerTextQuestion`. A URL in a **photo's** caption never reaches
 it — the ask is answered by image analysis, exactly as today. That
-precedence is deliberate for v1 (a combined image+page path is out of
-scope). The replied-caption URL case therefore applies to **non-photo media
-only** — videos, documents, audio — where `extractRepliedPhoto` returns
-`nil` and the text path runs with `ReplyToMessage.Caption` as the quoted
-text.
+precedence is deliberate for v1; a combined image+page path is out of
+scope.
+
+The replied-caption URL case applies only to **non-photo media** — videos,
+documents, audio. There, `extractRepliedPhoto` returns `nil`, and the text
+path runs with `ReplyToMessage.Caption` as the quoted text.
 
 The fallback covers **retrieval failures only** — URL detection coming up
 empty, the extract call failing, or zero usable excerpts. That preserves the
 "users never see a retrieval error" rule; worst case the answer is
-ungrounded, exactly as it is today when search fails. Once extraction has
-succeeded, errors from `explainWithExtractResults` (`ErrExplainBlocked`,
-`ErrExplainTimeout`, ...) propagate to `askHandler` exactly as
-`explainWithSearchResults` errors do — surfaced via
-`explainErrorToUserText`, never retried ungrounded, which would discard a
-safety verdict and pay for a second model call.
+ungrounded, exactly as it is today when search fails.
+
+Once extraction has succeeded, errors from `explainWithExtractResults` —
+`ErrExplainBlocked`, `ErrExplainTimeout`, and so on — propagate to
+`askHandler` exactly as `explainWithSearchResults` errors do, surfaced
+through `explainErrorToUserText`. They are never retried ungrounded: a
+retry would discard a safety verdict and burn a second model call for
+nothing.
 
 ### URL detection
 
@@ -120,8 +123,8 @@ New helper `extractQuestionURLs(message, question, quoted) (urls []string, strip
 
 1. **Prefer Telegram entities** — `url` and `text_link` entities are the
    authoritative source and catch bare domains like `example.com` that a
-   scheme-prefix scan would miss. Two sources, mirroring what the flow
-   actually sends to Gemini:
+   scheme-prefix scan would miss. Two sources, matching exactly what the
+   flow already sends to Gemini:
 
     - the user's own question: `message.Entities`, always;
     - the quoted side: **only the entity array belonging to the text source
@@ -176,25 +179,26 @@ the objective; if empty, the objective defaults to "Summarize the key points
 of this page". The empty case covers both a question that is only a URL
 *and* a bare `@bot` mention replying to a link-bearing message
 (`shouldHandleAskMention` accepts that ask with an empty question) — either
-way Parallel must never receive an empty objective, which mirrors the
-`search()` validation that rejects blank objectives.
+way Parallel must never receive an empty objective, a requirement
+`search()` already enforces against blank objectives.
 
 ### New file: `internal/bot/parallel_extract.go`
 
-Mirror `parallel_search.go` structure exactly:
+Match `parallel_search.go`'s structure exactly:
 
 - `parallelExtractor{baseURL, apiKey, timeout}` +
   `newParallelExtractor()` returning `nil` when `PARALLEL_API_KEY` is unset
-  (feature silently off, same convention as `newParallelSearcher()`) **or
-  when `EXTRACT_ENABLED` is explicitly false**. The kill switch is enforced
-  in the constructor, not at call sites: parse with `strconv.ParseBool`;
-  unset or unparsable values default to enabled (with a `log.Warn` on
-  unparsable, mirroring the lenient loaders elsewhere in the package). A
-  unit test covers the disabled path (`EXTRACT_ENABLED=false` + key set →
-  `nil`) and the invalid-value path (`EXTRACT_ENABLED=banana` → enabled).
+  (feature silently off, following `newParallelSearcher()`'s own
+  convention) **or when `EXTRACT_ENABLED` is explicitly false**. The
+  constructor enforces the kill switch, not the call sites: parse with
+  `strconv.ParseBool`; unset or unparsable values default to enabled, with
+  a `log.Warn` on an unparsable value, following the lenient-loader pattern
+  already used elsewhere in the package. A unit test covers the disabled
+  path (`EXTRACT_ENABLED=false` + key set → `nil`) and the invalid-value
+  path (`EXTRACT_ENABLED=banana` → enabled).
 - Response structs — unlike `parallelSearchResponse`, the Extract response
-  carries per-URL errors, and the struct **must** include them or they are
-  silently discarded by `encoding/json`:
+  carries per-URL errors, and the struct **must** include them, or
+  `encoding/json` silently discards them:
 
     ```go
     type parallelExtractResponse struct {
@@ -221,10 +225,11 @@ Mirror `parallel_search.go` structure exactly:
   following `search()`: span, per-call context timeout, `x-api-key` header,
   drain-body-before-close, bounded error body (reuse
   `maxParallelErrorBodyBytes`), non-200 → error. Reuse `parallelHTTPClient`.
-- Entries in `Errors` are logged (`log.Warn` with host, `error_type`,
-  `http_status_code`, and bounded `content`) and skipped, not fatal — one
-  dead link shouldn't kill a two-link question. A step-1 unit test asserts a
-  mixed success/error response still returns the successful results.
+- `extract()` logs each entry in `Errors` (`log.Warn` with host,
+  `error_type`, `http_status_code`, and bounded `content`) and skips it —
+  not fatal, since one dead link shouldn't kill a two-link question. A
+  step-1 unit test asserts a mixed success/error response still returns the
+  successful results.
 - `sanitizeParallelExtractResults()` follows `sanitizeParallelResults()`
   for per-field sanitization (`sanitizeForPrompt` on title and excerpts)
   but with a **stricter keep rule**: a result must have at least one
@@ -316,10 +321,10 @@ retried; they propagate like any other explain error:
 | `explainWithExtractResults` fails (blocked, timeout, ...) | propagate to `askHandler` → `explainErrorToUserText`; no ungrounded retry |
 
 Known tradeoff: on a bare-link question ("@bot <url>") the fallback answer
-will be Gemini saying it can't open links. That is the same failure mode the
-bot has today for pasted links, so extraction only ever improves the
-experience. Never surface Parallel error bodies in chat (quota/account
-details); log them bounded to 1KB as `search()` does.
+will be Gemini saying it can't open links. That failure mode already exists
+today for pasted links, so extraction only ever improves the experience.
+Never surface Parallel error bodies in chat (quota/account details); log
+them bounded to 1KB as `search()` does.
 
 Latency note: the extract failure + search-success fallback path triggers
 four model/API calls (extract → Gemini classifier → search → Gemini explain)
@@ -330,7 +335,7 @@ ask is small, and the failure case is rare once the API is stable.
 ## Implementation steps
 
 1. **`parallel_extract.go`** — client, config loaders, sanitizer.
-   Unit tests with `httptest.Server` mirroring `parallel_search_test.go`
+   Unit tests with `httptest.Server`, modeled on `parallel_search_test.go`
    (success, per-URL errors, non-200, timeout, malformed JSON, budgets).
    The constructor `newParallelExtractor()` must check `EXTRACT_ENABLED`
    before returning a non-nil extractor — the `PARALLEL_API_KEY` check

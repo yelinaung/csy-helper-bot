@@ -59,7 +59,14 @@ lint:
 
 test:
   stage: validate
-  image: golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
+  # glibc-based, not Alpine: hegel's native library requires glibc, and
+  # purego's fakecgo shim (used to load that library without real cgo)
+  # collides with runtime/cgo's own _cgo_init symbol when linking the test
+  # binary on musl — link: duplicated definition of symbol _cgo_init. Alpine
+  # plus gcompat/libgcc glibc-compat shims used to work around the glibc
+  # requirement alone, but doesn't avoid this separate musl-specific link
+  # failure; a glibc image needs neither the shims nor the workaround.
+  image: golang:1.26@sha256:3aff6657219a4d9c14e27fb1d8976c49c29fddb70ba835014f477e1c70636647
   tags:
   - playground-bravo
   needs:
@@ -73,10 +80,6 @@ test:
   before_script:
   - export GOCACHE="$(pwd)/.cache/go-build"
   - export GOMODCACHE="$(pwd)/.cache/go-mod"
-  # Hegel's native library requires glibc; the Alpine-based image uses musl.
-  # gcompat provides ld-linux-x86-64.so.2 and other glibc stubs; libgcc
-  # provides libgcc_s.so.1, which libhegel-linux-amd64.so links against.
-  - apk add --no-cache gcompat libgcc
   script:
   - go test -v ./...
   - |

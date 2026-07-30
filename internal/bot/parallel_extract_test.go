@@ -224,6 +224,26 @@ func TestParallelExtractor_AllResultsFilteredBySanitization(t *testing.T) {
 	}
 }
 
+// TestSanitizeExtractErrorContent_RedactsSecrets covers a Parallel per-URL
+// error echoing the requested URL verbatim in its Content field (e.g. a
+// fetch-error message): sanitizeForPrompt alone only normalizes UTF-8/NULs
+// and truncates, it does not strip credentials, so the content must be
+// redacted first or a token/api_key query value would reach logs unmasked.
+func TestSanitizeExtractErrorContent_RedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	content := `fetch failed for "https://example.com/page?token=super-secret-value": connection reset`
+
+	got := sanitizeExtractErrorContent(content)
+
+	if strings.Contains(got, "super-secret-value") {
+		t.Fatalf("sanitizeExtractErrorContent() leaked the secret token: %q", got)
+	}
+	if !strings.Contains(got, "<redacted>") {
+		t.Errorf("sanitizeExtractErrorContent() = %q, want a redaction placeholder", got)
+	}
+}
+
 func TestNewParallelExtractor(t *testing.T) {
 	t.Setenv("PARALLEL_API_KEY", "  ")
 	t.Setenv("EXTRACT_ENABLED", "")

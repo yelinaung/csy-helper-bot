@@ -17,6 +17,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	appotel "gitlab.com/yelinaung/csy-helper-bot/internal/otel"
 )
 
 const (
@@ -204,8 +206,18 @@ func logExtractURLError(extractErr parallelExtractError) {
 		Str("host", urlHost(extractErr.URL)).
 		Str("error_type", extractErr.ErrorType).
 		Int("http_status_code", statusCode).
-		Str("content", sanitizeForPrompt(extractErr.Content, maxExtractErrorContentRuneLen)).
+		Str("content", sanitizeExtractErrorContent(extractErr.Content)).
 		Msg("Parallel extract failed for URL")
+}
+
+// sanitizeExtractErrorContent prepares an upstream Extract error's Content
+// field for logging. Content is Parallel-controlled text and can echo back
+// the requested URL verbatim (e.g. in a fetch-error message), so it goes
+// through the same credential redaction as other error text before the
+// usual rune-budget truncation — sanitizeForPrompt only normalizes
+// UTF-8/NULs and truncates, it does not strip secret query parameters.
+func sanitizeExtractErrorContent(content string) string {
+	return sanitizeForPrompt(appotel.RedactSensitiveText(content), maxExtractErrorContentRuneLen)
 }
 
 // urlHost extracts just the host from a URL for low-cardinality, low-PII

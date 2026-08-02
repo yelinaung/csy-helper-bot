@@ -38,6 +38,7 @@ var (
 	botMention            string
 	botUserID             int64
 	allowedGroups         map[int64]struct{}
+	allowedUsernames      map[string]struct{}
 )
 
 // wireOTelTransports wraps the package-level HTTP clients' transports with
@@ -201,6 +202,12 @@ func Run() error {
 		return fmt.Errorf("failed to parse ALLOWED_GROUP_IDS: %w", err)
 	}
 	logAllowedGroups("Loaded allowed group configuration")
+
+	allowedUsernames, err = parseAllowedUsernames(os.Getenv("ALLOWED_USERNAMES"))
+	if err != nil {
+		return fmt.Errorf("failed to parse ALLOWED_USERNAMES: %w", err)
+	}
+	logAllowedUsernames("Loaded allowed username configuration")
 
 	var initErr error
 	textExplainer, initErr = initGeminiExplainer()
@@ -376,10 +383,48 @@ func parseAllowedGroupIDs(raw string) (map[int64]struct{}, error) {
 	return result, nil
 }
 
+// parseAllowedUsernames parses a comma-separated ALLOWED_USERNAMES value into a
+// set of normalized (lowercased, "@"-stripped) Telegram usernames. Telegram
+// usernames are case-insensitive, so normalizing here lets lookups compare
+// lowercase to lowercase.
+func parseAllowedUsernames(raw string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if strings.TrimSpace(raw) == "" {
+		return result, nil
+	}
+
+	for token := range strings.SplitSeq(raw, ",") {
+		name := strings.TrimPrefix(strings.TrimSpace(token), "@")
+		if name == "" {
+			continue
+		}
+		for i := 0; i < len(name); i++ {
+			if !isTelegramUsernameChar(name[i]) {
+				return nil, fmt.Errorf("invalid username %q", name)
+			}
+		}
+		result[strings.ToLower(name)] = struct{}{}
+	}
+
+	return result, nil
+}
+
+func isAllowedUsername(username string) bool {
+	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if name == "" {
+		return false
+	}
+	_, ok := allowedUsernames[name]
+	return ok
+}
+
 func enforceChatAccess(ctx context.Context, b *bot.Bot, update *models.Update) bool {
 	chat := extractChatFromUpdate(update)
 	if chat == nil {
 		return true
+	}
+	if chat.Type == models.ChatTypePrivate {
+		return enforcePrivateChatAccess(chat, update)
 	}
 	if !isGroupLikeChat(chat.Type) {
 		log.Info().
@@ -409,6 +454,32 @@ func enforceChatAccess(ctx context.Context, b *bot.Bot, update *models.Update) b
 			Int64("chat_id", chat.ID).
 			Msg("Failed to leave unauthorized group")
 	}
+	return false
+}
+
+// enforcePrivateChatAccess gates direct messages on ALLOWED_USERNAMES. Unlike
+// groups there is nothing to leave, so an unauthorized DM is simply ignored.
+// Users who have not set a Telegram username cannot be allowlisted.
+func enforcePrivateChatAccess(chat *models.Chat, update *models.Update) bool {
+	user := extractUserFromUpdate(update)
+	username := ""
+	if user != nil {
+		username = user.Username
+	}
+	if isAllowedUsername(username) {
+		log.Info().
+			Int64("chat_id", chat.ID).
+			Str("username", strings.ToLower(username)).
+			Bool("allowed", true).
+			Msg("Private chat activity")
+		return true
+	}
+
+	log.Info().
+		Int64("chat_id", chat.ID).
+		Str("username", strings.ToLower(username)).
+		Bool("allowed", false).
+		Msg("Ignoring private chat from unauthorized user")
 	return false
 }
 
@@ -444,6 +515,33 @@ func extractChatFromUpdate(update *models.Update) *models.Chat {
 	return nil
 }
 
+// extractUserFromUpdate returns the user who triggered the update, mirroring
+// the update kinds handled by extractChatFromUpdate.
+func extractUserFromUpdate(update *models.Update) *models.User {
+	if update == nil {
+		return nil
+	}
+	switch {
+	case update.Message != nil:
+		return update.Message.From
+	case update.EditedMessage != nil:
+		return update.EditedMessage.From
+	case update.ChannelPost != nil:
+		return update.ChannelPost.From
+	case update.EditedChannelPost != nil:
+		return update.EditedChannelPost.From
+	case update.MyChatMember != nil:
+		return &update.MyChatMember.From
+	case update.ChatMember != nil:
+		return &update.ChatMember.From
+	case update.ChatJoinRequest != nil:
+		return &update.ChatJoinRequest.From
+	case update.CallbackQuery != nil:
+		return &update.CallbackQuery.From
+	}
+	return nil
+}
+
 func isGroupLikeChat(chatType models.ChatType) bool {
 	return chatType == models.ChatTypeGroup || chatType == models.ChatTypeSupergroup
 }
@@ -458,6 +556,7 @@ func startAllowedGroupsReporter(ctx context.Context) {
 			return
 		case <-ticker.C:
 			logAllowedGroups("Allowed group configuration heartbeat")
+			logAllowedUsernames("Allowed username configuration heartbeat")
 		}
 	}
 }
@@ -472,6 +571,19 @@ func logAllowedGroups(message string) {
 	log.Info().
 		Int("allowed_group_count", len(ids)).
 		Interface("allowed_group_ids", ids).
+		Msg(message)
+}
+
+func logAllowedUsernames(message string) {
+	names := make([]string, 0, len(allowedUsernames))
+	for name := range allowedUsernames {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	log.Info().
+		Int("allowed_username_count", len(names)).
+		Interface("allowed_usernames", names).
 		Msg(message)
 }
 

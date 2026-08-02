@@ -15,6 +15,8 @@ A Telegram bot that posts stock quotes and charts, answers questions with Gemini
 - `!sa AAPL` — stock analysis: the current quote, latest news from Exa, and a Gemini summary
 - `@<bot_username> <question>` — answers the question with Gemini, with or without a quoted message (e.g. `@<bot_username> what does mutex mean?`, or reply to a message and ask `can you explain this?`)
 
+In a private chat the mention is optional: any message, or a photo with or without a caption, is treated as a question. Slash commands and messages that are only tweet links still go to their own handlers.
+
 When the question or the quoted message contains Burmese, the bot answers in Burmese. Each answer picks a random tone with a matching facial-expression emoji. An in-memory rate limiter caps how often users can ask.
 
 If the question or the quoted/replied message contains a link, the bot fetches the page content with [Parallel Extract](https://parallel.ai/products/extract) and grounds the answer in it — e.g. `@<bot_username> https://example.com/pricing what are the plan prices?`, or reply to a message with a link and ask `@<bot_username> summarize this`. Requires `PARALLEL_API_KEY` (the same key used for web search below).
@@ -65,6 +67,8 @@ If the question or the quoted/replied message contains a link, the bot fetches t
     # optional (defaults to 3, capped at 10)
     EXTRACT_MAX_URLS=3
     ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
+    # optional: allow these users to DM the bot (case-insensitive, "@" optional)
+    ALLOWED_USERNAMES=alice,@bob_99
     EXPLAIN_RATE_LIMIT_COUNT=5
     EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
     LOG_LEVEL=info
@@ -92,7 +96,9 @@ If the question or the quoted/replied message contains a link, the bot fetches t
 
 ## Access Control
 
-The bot responds only in groups and supergroups listed in `ALLOWED_GROUP_IDS`. It ignores private chats, and it leaves any group not on the list.
+The bot responds only in groups and supergroups listed in `ALLOWED_GROUP_IDS`, and it leaves any group not on the list.
+
+In private chats, the sender's Telegram username must be listed in `ALLOWED_USERNAMES` (comma-separated, case-insensitive, a leading `@` is optional). Everyone else is ignored — the bot cannot leave a DM, so it simply does not reply, and users who have not set a username cannot be allowlisted. `ALLOWED_USERNAMES` is empty by default, so private chats stay closed unless you opt in.
 
 ## Observability (OpenTelemetry)
 
@@ -143,6 +149,7 @@ docker run \
   -e EXA_API_KEY=your_exa_key \
   -e STOCK_ANALYSIS_MODEL=gemini-3.5-flash \
   -e ALLOWED_GROUP_IDS=-1001234567890 \
+  -e ALLOWED_USERNAMES=alice,bob_99 \
   -e LOG_LEVEL=info \
   -e OTEL_ENABLED=true \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
@@ -165,6 +172,7 @@ dokku config:set csy-helper-bot STOCK_ANALYSIS_ENABLED=true
 dokku config:set csy-helper-bot EXA_API_KEY=your_exa_key
 dokku config:set csy-helper-bot STOCK_ANALYSIS_MODEL=gemini-3.5-flash
 dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
+dokku config:set csy-helper-bot ALLOWED_USERNAMES=alice,bob_99
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_WINDOW_SECONDS=60
 dokku config:set csy-helper-bot LOG_LEVEL=info

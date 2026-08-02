@@ -73,10 +73,7 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
 			MessageThreadID: update.Message.MessageThreadID,
-			Text: fmt.Sprintf(
-				`Send "%q your question here", or reply to a message with "%q" (optionally followed by a question) to ask about it.`,
-				botMention, botMention,
-			),
+			Text:            askUsageText(update.Message),
 		})
 		return
 	}
@@ -148,6 +145,18 @@ func askHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	appotel.RecordOutcome(ctx, "success")
 	sendOrEditExplainResult(ctx, b, update, thinkingMsg, thinkingErr, explanation)
+}
+
+// askUsageText explains how to ask a question. Direct messages need no mention,
+// so the group-oriented instructions would only confuse there.
+func askUsageText(message *models.Message) string {
+	if isPrivateMessage(message) {
+		return "Send me your question, or reply to a message to ask about it."
+	}
+	return fmt.Sprintf(
+		`Send "%q your question here", or reply to a message with "%q" (optionally followed by a question) to ask about it.`,
+		botMention, botMention,
+	)
 }
 
 var errAskPhotoDownload = errors.New("download replied photo")
@@ -376,15 +385,27 @@ func shouldRespondInBurmese(texts ...string) bool {
 	return false
 }
 
+// isPrivateMessage reports whether a message arrived in a one-on-one chat with
+// the bot. Access to those chats is already gated by ALLOWED_USERNAMES, and
+// there is nobody else to address, so the bot answers without being mentioned.
+func isPrivateMessage(message *models.Message) bool {
+	return message != nil && message.Chat.Type == models.ChatTypePrivate
+}
+
 func shouldHandleAskMention(update *models.Update) bool {
 	if update == nil || update.Message == nil {
 		return false
 	}
-	if botMention == "" {
+
+	if strings.TrimSpace(update.Message.Text) == "" {
 		return false
 	}
 
-	if strings.TrimSpace(update.Message.Text) == "" {
+	if isPrivateMessage(update.Message) && shouldHandlePrivateAsk(update.Message) {
+		return true
+	}
+
+	if botMention == "" {
 		return false
 	}
 	mention, suffix, ok := extractMentionAndSuffix(update.Message)
@@ -401,17 +422,49 @@ func shouldHandleAskMention(update *models.Update) bool {
 	return extractQuotedText(update.Message) != "" || extractRepliedPhoto(update.Message) != nil
 }
 
+// shouldHandlePrivateAsk decides whether a direct message should be answered as
+// a question. Slash commands are left alone, and a message that is nothing but
+// tweet links is left to the x-link rewriter — pasting a bare link is a request
+// to fix the link, not a question about it.
+func shouldHandlePrivateAsk(message *models.Message) bool {
+	text := strings.TrimSpace(message.Text)
+	if text == "" || strings.HasPrefix(text, "/") {
+		return false
+	}
+	return !isOnlyXLinks(text)
+}
+
+func isOnlyXLinks(text string) bool {
+	if len(extractFixedXLinks(text)) == 0 {
+		return false
+	}
+	for field := range strings.FieldsSeq(text) {
+		if !xLinkRegexp.MatchString(field) {
+			return false
+		}
+	}
+	return true
+}
+
 func extractAskQuestion(message *models.Message) string {
-	if message == nil || botMention == "" {
+	if message == nil {
 		return ""
 	}
 
-	mention, suffix, ok := extractMentionAndSuffix(message)
-	if !ok || !strings.EqualFold(mention, botMention) {
-		return ""
+	if botMention != "" {
+		mention, suffix, ok := extractMentionAndSuffix(message)
+		if ok && strings.EqualFold(mention, botMention) {
+			return stripAskPrefix(suffix)
+		}
 	}
 
-	return stripAskPrefix(suffix)
+	// In a direct message the whole text is the question; there is no mention
+	// to strip.
+	if isPrivateMessage(message) {
+		return stripAskPrefix(message.Text)
+	}
+
+	return ""
 }
 
 func stripAskPrefix(suffix string) string {
@@ -645,10 +698,13 @@ func shouldHandlePhotoAsk(update *models.Update) bool {
 	if update == nil || update.Message == nil {
 		return false
 	}
-	if botMention == "" {
+	if len(update.Message.Photo) == 0 {
 		return false
 	}
-	if len(update.Message.Photo) == 0 {
+	if isPrivateMessage(update.Message) {
+		return true
+	}
+	if botMention == "" {
 		return false
 	}
 
@@ -757,7 +813,7 @@ func photoAskHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 }
 
 func extractPhotoAskQuestion(message *models.Message) string {
-	if message == nil || botMention == "" {
+	if message == nil {
 		return ""
 	}
 
@@ -766,22 +822,29 @@ func extractPhotoAskQuestion(message *models.Message) string {
 		return ""
 	}
 
-	for _, entity := range message.CaptionEntities {
-		if entity.Type != models.MessageEntityTypeMention {
-			continue
+	if botMention != "" {
+		for _, entity := range message.CaptionEntities {
+			if entity.Type != models.MessageEntityTypeMention {
+				continue
+			}
+			mention, suffix, ok := mentionAndSuffixAtEntity(caption, &entity)
+			if ok && strings.EqualFold(mention, botMention) {
+				return stripAskPrefix(suffix)
+			}
 		}
-		mention, suffix, ok := mentionAndSuffixAtEntity(caption, &entity)
+
+		mention, suffix, ok := mentionAndSuffixFromText(caption, botMention)
 		if ok && strings.EqualFold(mention, botMention) {
 			return stripAskPrefix(suffix)
 		}
 	}
 
-	mention, suffix, ok := mentionAndSuffixFromText(caption, botMention)
-	if !ok || !strings.EqualFold(mention, botMention) {
-		return ""
+	// In a direct message the caption needs no mention to be the question.
+	if isPrivateMessage(message) {
+		return stripAskPrefix(caption)
 	}
 
-	return stripAskPrefix(suffix)
+	return ""
 }
 
 func containsMention(text, targetMention string) bool {

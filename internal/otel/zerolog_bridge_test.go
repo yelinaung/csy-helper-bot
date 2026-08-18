@@ -2,12 +2,12 @@ package otel
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -55,17 +55,8 @@ func newBridgeWithCapture(t *testing.T) (*capturingLogExporter, *otelLogWriter) 
 
 func attributeMap(r *sdklog.Record) map[string]string {
 	out := map[string]string{}
-	r.WalkAttributes(func(kv otellog.KeyValue) bool {
-		switch kv.Value.Kind() {
-		case otellog.KindBool:
-			out[kv.Key] = strconv.FormatBool(kv.Value.AsBool())
-		case otellog.KindInt64:
-			out[kv.Key] = strconv.FormatInt(kv.Value.AsInt64(), 10)
-		case otellog.KindFloat64:
-			out[kv.Key] = strconv.FormatFloat(kv.Value.AsFloat64(), 'f', -1, 64)
-		case otellog.KindEmpty, otellog.KindString, otellog.KindBytes, otellog.KindSlice, otellog.KindMap:
-			out[kv.Key] = kv.Value.AsString()
-		}
+	r.WalkAttributes(func(kv attribute.KeyValue) bool {
+		out[string(kv.Key)] = kv.Value.String()
 		return true
 	})
 	return out
@@ -142,21 +133,21 @@ func TestZerologBridge_IntegerPreservesInt64(t *testing.T) {
 
 	records := exp.snapshot()
 	require.Len(t, records, 1)
-	require.Equal(t, otellog.KindInt64, logAttrKind(&records[0], "user_id"))
+	require.Equal(t, attribute.INT64, logAttrType(&records[0], "user_id"))
 	require.Equal(t, bigID, attributeMap(&records[0])["user_id"])
 }
 
-// logAttrKind returns the Kind of the named attribute, or KindEmpty if absent.
-func logAttrKind(r *sdklog.Record, key string) otellog.Kind {
-	var kind otellog.Kind
-	r.WalkAttributes(func(kv otellog.KeyValue) bool {
-		if kv.Key == key {
-			kind = kv.Value.Kind()
+// logAttrType returns the Type of the named attribute, or EMPTY if absent.
+func logAttrType(r *sdklog.Record, key string) attribute.Type {
+	var typ attribute.Type
+	r.WalkAttributes(func(kv attribute.KeyValue) bool {
+		if string(kv.Key) == key {
+			typ = kv.Value.Type()
 			return false
 		}
 		return true
 	})
-	return kind
+	return typ
 }
 
 func TestZerologBridge_Multiline(t *testing.T) {

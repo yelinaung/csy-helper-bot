@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -88,10 +89,10 @@ func (w *otelLogWriter) emitLine(line []byte) {
 	}
 
 	if message, ok := fields["message"].(string); ok {
-		record.SetBody(otellog.StringValue(message))
+		record.SetBody(attribute.StringValue(message))
 	}
 
-	attrs := make([]otellog.KeyValue, 0, len(fields))
+	attrs := make([]attribute.KeyValue, 0, len(fields))
 	for k, v := range fields {
 		if isReservedZerologKey(k) {
 			continue
@@ -149,39 +150,39 @@ func logValueString(v any) string {
 
 // toLogAttribute best-effort types a zerolog field value into an OTel log
 // KeyValue. URL-bearing keys are redacted via the shared redactURL helper.
-func toLogAttribute(k string, v any) otellog.KeyValue {
+func toLogAttribute(k string, v any) attribute.KeyValue {
 	lowerKey := strings.ToLower(k)
 	if _, isURLKey := logURLAttrKeys[lowerKey]; isURLKey {
-		return otellog.String(k, redactURL(logValueString(v)))
+		return attribute.String(k, redactURL(logValueString(v)))
 	}
 	if _, isSensitiveTextKey := logSensitiveTextAttrKeys[lowerKey]; isSensitiveTextKey {
-		return otellog.String(k, RedactSensitiveText(logValueString(v)))
+		return attribute.String(k, RedactSensitiveText(logValueString(v)))
 	}
 
 	switch val := v.(type) {
 	case string:
-		return otellog.String(k, val)
+		return attribute.String(k, val)
 	case bool:
-		return otellog.Bool(k, val)
+		return attribute.Bool(k, val)
 	case float64:
-		return otellog.Float64(k, val)
+		return attribute.Float64(k, val)
 	case json.Number:
 		// Prefer int64 for whole numbers (preserves large IDs/timestamps that
 		// lose precision as float64); fall back to float64, then the raw text.
 		if i, err := val.Int64(); err == nil {
-			return otellog.Int64(k, i)
+			return attribute.Int64(k, i)
 		}
 		if f, err := val.Float64(); err == nil {
-			return otellog.Float64(k, f)
+			return attribute.Float64(k, f)
 		}
-		return otellog.String(k, val.String())
+		return attribute.String(k, val.String())
 	case nil:
-		return otellog.String(k, "")
+		return attribute.String(k, "")
 	default:
 		raw, err := json.Marshal(val)
 		if err != nil {
-			return otellog.String(k, "")
+			return attribute.String(k, "")
 		}
-		return otellog.String(k, string(raw))
+		return attribute.String(k, string(raw))
 	}
 }

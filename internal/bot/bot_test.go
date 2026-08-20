@@ -201,7 +201,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.TitleSlug = "two-sum"
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Difficulty = "Easy"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
 		}
@@ -211,7 +211,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockResponse)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -232,10 +232,10 @@ func TestFetchDailyLeetCode(t *testing.T) {
 }
 
 func TestFetchDailyLeetCode_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -246,10 +246,10 @@ func TestFetchDailyLeetCode_ServerError(t *testing.T) {
 }
 
 func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("invalid json"))
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -260,11 +260,11 @@ func TestFetchDailyLeetCode_InvalidJSON(t *testing.T) {
 }
 
 func TestFetchDailyLeetCode_GraphQLError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"errors":[{"message":"rate limited"}]}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -275,11 +275,11 @@ func TestFetchDailyLeetCode_GraphQLError(t *testing.T) {
 }
 
 func TestFetchDailyLeetCode_EmptyQuestionData(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"activeDailyCodingChallengeQuestion":{"question":{"title":"","titleSlug":"","difficulty":""}}}}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -620,7 +620,7 @@ func TestFetchStockQuote(t *testing.T) {
 		PreviousClose: 147.75,
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
 		}
@@ -630,7 +630,7 @@ func TestFetchStockQuote(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockQuote)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -649,10 +649,10 @@ func TestFetchStockQuote(t *testing.T) {
 }
 
 func TestFetchStockQuote_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -664,11 +664,11 @@ func TestFetchStockQuote_ServerError(t *testing.T) {
 }
 
 func TestFetchStockQuote_SymbolNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(StockQuote{})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -687,14 +687,14 @@ func TestFetchCompanyProfile(t *testing.T) {
 		Exchange:             "NASDAQ",
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("symbol") != testSymbolAAPL {
 			t.Errorf("expected symbol=AAPL, got %s", r.URL.Query().Get("symbol"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockProfile)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1208,7 +1208,7 @@ func TestFetchFinancialMetrics_Success(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubMetricsPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1224,7 +1224,7 @@ func TestFetchFinancialMetrics_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockMetrics)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1245,14 +1245,14 @@ func TestFetchFinancialMetrics_Success(t *testing.T) {
 }
 
 func TestFetchFinancialMetrics_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubMetricsPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1269,7 +1269,7 @@ func TestFetchEarningsHistory_Success(t *testing.T) {
 		{Period: "2025-12-31", Actual: 2.20, Estimate: 2.18, Surprise: 0.02, SurprisePct: 0.92},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubEarningsPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1281,7 +1281,7 @@ func TestFetchEarningsHistory_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockEarnings)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1302,7 +1302,7 @@ func TestFetchEarningsHistory_Success(t *testing.T) {
 }
 
 func TestFetchEarningsHistory_EmptyArray(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubEarningsPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1310,7 +1310,7 @@ func TestFetchEarningsHistory_EmptyArray(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]EarningsEntry{})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1330,7 +1330,7 @@ func TestFetchRecommendation_Success(t *testing.T) {
 		{Period: "2026-04", StrongBuy: 14, Buy: 19, Hold: 6, Sell: 3, StrongSell: 1},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubRecommendPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1342,7 +1342,7 @@ func TestFetchRecommendation_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockRec)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1363,7 +1363,7 @@ func TestFetchRecommendation_Success(t *testing.T) {
 }
 
 func TestFetchRecommendation_EmptyArray(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubRecommendPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1371,7 +1371,7 @@ func TestFetchRecommendation_EmptyArray(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]RecommendationTrend{})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1386,14 +1386,14 @@ func TestFetchRecommendation_EmptyArray(t *testing.T) {
 }
 
 func TestFetchRecommendation_NotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubRecommendPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1413,7 +1413,7 @@ func TestFetchPriceTarget_Success(t *testing.T) {
 		CurrentPrice: 187,
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubPriceTargetPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1425,7 +1425,7 @@ func TestFetchPriceTarget_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockPT)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -1480,7 +1480,7 @@ func TestFetchPriceTarget_MissingAPIKey(t *testing.T) {
 func TestFetchPriceTarget_ZeroTargets_ReturnsNil(t *testing.T) {
 	mockPT := PriceTarget{} // All fields zero.
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != finnhubPriceTargetPath {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -1488,7 +1488,7 @@ func TestFetchPriceTarget_ZeroTargets_ReturnsNil(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockPT)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")

@@ -29,10 +29,10 @@ func TestNewHTTPTransport_NilBaseUsesDefault(t *testing.T) {
 func TestNewHTTPTransport_PreservesContext(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := &http.Client{Transport: NewHTTPTransport(http.DefaultTransport)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)

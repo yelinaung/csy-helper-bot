@@ -885,8 +885,8 @@ func (s *testBotServer) requestCount() int {
 func newTestBot(t *testing.T) (*bot.Bot, *testBotServer) {
 	t.Helper()
 	srv := &testBotServer{}
-	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
-	t.Cleanup(server.Close)
+	server := httptest.NewTestServer(t, http.HandlerFunc(srv.ServeHTTP))
+	server.Start()
 
 	opts := []bot.Option{
 		bot.WithServerURL(server.URL),
@@ -1128,7 +1128,7 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 	}
 	mockExaResp.CostDollars.Total = 0.005
 
-	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatchServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -1139,7 +1139,7 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer dispatchServer.Close()
+	dispatchServer.Start()
 	useRedirectedHTTPClient(t, dispatchServer.URL)
 
 	t.Setenv("FINNHUB_API_KEY", "test-finnhub-key")
@@ -1189,10 +1189,10 @@ func TestStockAnalysisHandler_SuccessFlow(t *testing.T) {
 }
 
 func TestStockAnalysisHandler_FinnhubFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "test-key")
 
@@ -1226,7 +1226,7 @@ func TestStockAnalysisHandler_ExaFailure(t *testing.T) {
 	mockQuote := StockQuote{CurrentPrice: 150.0}
 	mockProfile := CompanyProfile{Name: testProfileName}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -1237,7 +1237,7 @@ func TestStockAnalysisHandler_ExaFailure(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
 	t.Setenv("EXA_API_KEY", "exa-key")
@@ -1273,7 +1273,7 @@ func TestStockAnalysisHandler_GeminiTimeout(t *testing.T) {
 	mockProfile := CompanyProfile{Name: testProfileName}
 	mockExaResp := exaSearchResponse{RequestID: "req", Results: []exaSearchResult{}}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -1284,7 +1284,7 @@ func TestStockAnalysisHandler_GeminiTimeout(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
 	t.Setenv("EXA_API_KEY", "exa-key")
@@ -1320,7 +1320,7 @@ func TestStockAnalysisHandler_GeminiBlocked(t *testing.T) {
 	mockProfile := CompanyProfile{Name: testProfileName}
 	mockExaResp := exaSearchResponse{RequestID: "req", Results: []exaSearchResult{}}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -1331,7 +1331,7 @@ func TestStockAnalysisHandler_GeminiBlocked(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 	t.Setenv("FINNHUB_API_KEY", "finnhub-key")
 	t.Setenv("EXA_API_KEY", "exa-key")
@@ -1547,8 +1547,8 @@ func TestAnalyze_GeneratesDifferentNoncesPerCall(t *testing.T) {
 func TestSendOrEditAnalysisResult_FallbackToPlaintext(t *testing.T) {
 	// Create a bot server that rejects the first edit to trigger fallback.
 	srv := &testBotServer{failNextEdit: true}
-	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
-	defer server.Close()
+	server := httptest.NewTestServer(t, http.HandlerFunc(srv.ServeHTTP))
+	server.Start()
 
 	opts := []bot.Option{
 		bot.WithServerURL(server.URL),
@@ -1639,10 +1639,10 @@ func TestSearchStockNews_NotFoundStatus(t *testing.T) {
 	t.Setenv("EXA_API_KEY", "test-key")
 	resetExaCacheForTest(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 
 	_, err := searchStockNews(context.Background(), "AAPL", nil)
@@ -1681,8 +1681,8 @@ func TestAnalyze_GeneratorError(t *testing.T) {
 func TestSendOrEditAnalysisResult_SendFallback(t *testing.T) {
 	// Edit fails, then send succeeds — tests the SendMessage fallback.
 	srv := &testBotServer{failNextEdit: true}
-	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
-	defer server.Close()
+	server := httptest.NewTestServer(t, http.HandlerFunc(srv.ServeHTTP))
+	server.Start()
 
 	opts := []bot.Option{
 		bot.WithServerURL(server.URL),
@@ -1750,8 +1750,8 @@ func TestAllow_BoundRejectionReturnsRetryAfter(t *testing.T) {
 func TestSendOrEditAnalysisResult_SendV2FailFallback(t *testing.T) {
 	// V2 SendMessage fails, triggering plaintext SendMessage fallback.
 	srv := &testBotServer{failNextSend: true}
-	server := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
-	defer server.Close()
+	server := httptest.NewTestServer(t, http.HandlerFunc(srv.ServeHTTP))
+	server.Start()
 
 	opts := []bot.Option{
 		bot.WithServerURL(server.URL),
@@ -1789,7 +1789,7 @@ func TestSearchStockNews_CacheEviction(t *testing.T) {
 	resetExaCacheForTest(t)
 
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(exaSearchResponse{
@@ -1798,7 +1798,7 @@ func TestSearchStockNews_CacheEviction(t *testing.T) {
 			},
 		})
 	}))
-	defer server.Close()
+	server.Start()
 	useRedirectedHTTPClient(t, server.URL)
 
 	// Fill cache to capacity with unique symbols.
@@ -2506,7 +2506,7 @@ func TestStockAnalysisHandler_PriceTargetFails(t *testing.T) {
 		Results:   []exaSearchResult{{Title: "News"}},
 	}
 
-	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatchServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -2525,7 +2525,7 @@ func TestStockAnalysisHandler_PriceTargetFails(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer dispatchServer.Close()
+	dispatchServer.Start()
 	useRedirectedHTTPClient(t, dispatchServer.URL)
 
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -2576,7 +2576,7 @@ func TestStockAnalysisHandler_EarningsRxnsSkipNoDatabento(t *testing.T) {
 		Results:   []exaSearchResult{{Title: "News"}},
 	}
 
-	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatchServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -2591,7 +2591,7 @@ func TestStockAnalysisHandler_EarningsRxnsSkipNoDatabento(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer dispatchServer.Close()
+	dispatchServer.Start()
 	useRedirectedHTTPClient(t, dispatchServer.URL)
 
 	t.Setenv("FINNHUB_API_KEY", "test-key")
@@ -2685,7 +2685,7 @@ func TestStockAnalysisHandler_SuccessWithFundamentals(t *testing.T) {
 	}
 	mockExaResp.CostDollars.Total = 0.005
 
-	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatchServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case finnhubQuotePath:
@@ -2704,7 +2704,7 @@ func TestStockAnalysisHandler_SuccessWithFundamentals(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(mockExaResp)
 		}
 	}))
-	defer dispatchServer.Close()
+	dispatchServer.Start()
 	useRedirectedHTTPClient(t, dispatchServer.URL)
 
 	t.Setenv("FINNHUB_API_KEY", "test-finnhub-key")

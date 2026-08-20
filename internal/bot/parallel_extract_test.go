@@ -15,8 +15,8 @@ import (
 // pointed at it, avoiding any shared package-level state.
 func newTestParallelExtractor(t *testing.T, handler http.HandlerFunc) *parallelExtractor {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := httptest.NewTestServer(t, handler)
+	server.Start()
 
 	return &parallelExtractor{
 		baseURL: server.URL,

@@ -43,7 +43,7 @@ func TestSearchStockNews_Success(t *testing.T) {
 	mockResp.CostDollars.Total = 0.005
 
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
@@ -54,7 +54,7 @@ func TestSearchStockNews_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockResp)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -85,11 +85,11 @@ func TestSearchStockNews_EmptyResults(t *testing.T) {
 		Results:   []exaSearchResult{},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(mockResp)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -106,10 +106,10 @@ func TestSearchStockNews_ServerError(t *testing.T) {
 	t.Setenv("EXA_API_KEY", "test-key")
 	resetExaCacheForTest(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -123,10 +123,10 @@ func TestSearchStockNews_Unauthorized(t *testing.T) {
 	t.Setenv("EXA_API_KEY", "test-key")
 	resetExaCacheForTest(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -152,11 +152,11 @@ func TestSearchStockNews_ContextCanceled(t *testing.T) {
 	t.Setenv("EXA_API_KEY", "test-key")
 	resetExaCacheForTest(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Block until context is canceled.
 		<-r.Context().Done()
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -364,7 +364,7 @@ func TestExaResultsCache_Hit(t *testing.T) {
 	resetExaCacheForTest(t)
 
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(exaSearchResponse{
@@ -373,7 +373,7 @@ func TestExaResultsCache_Hit(t *testing.T) {
 			},
 		})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -409,7 +409,7 @@ func TestExaResultsCache_Expired(t *testing.T) {
 	resetExaCacheForTest(t)
 
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(exaSearchResponse{
@@ -418,7 +418,7 @@ func TestExaResultsCache_Expired(t *testing.T) {
 			},
 		})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 
@@ -454,7 +454,7 @@ func TestExaResultsCache_Eviction(t *testing.T) {
 	resetExaCacheForTest(t)
 
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(exaSearchResponse{
@@ -463,7 +463,7 @@ func TestExaResultsCache_Eviction(t *testing.T) {
 			},
 		})
 	}))
-	defer server.Close()
+	server.Start()
 
 	useRedirectedHTTPClient(t, server.URL)
 

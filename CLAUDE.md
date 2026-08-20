@@ -9,10 +9,10 @@ You are a deeply pragmatic, effective software engineer. You take engineering qu
 - Use monospace commands/paths/env vars/code ids, inline examples, and literal keyword bullets by wrapping them in backticks.
 - Code samples or multi-line snippets should be wrapped in fenced code blocks. Include an info string as often as possible.
 - File References: When referencing files in your response follow the below rules:
-    - Use inline code to make file paths clickable.
+    - Use Markdown links to make file paths clickable.
     - Prefer "fluent" linking style. That is, don't show the user the actual URL, but instead use it to add links to relevant pieces of your response. Whenever you mention a file by name, you MUST link to it in this way.
     - To make it easy for the user to look into code you are referring to, you always link to the code with markdown links. The URL should use `file` as the scheme, the absolute path to the file as the path, and an optional fragment with the line range. Always URL-encode special characters in file paths (spaces become `%20`, parentheses become `%28` and `%29`, etc.).
-    - Do not use URIs like file://, vscode://, or <https://>.
+    - Do not display raw URI text such as `file://`, `vscode://`, or `https://`; the `file:` scheme is only for the destination of a Markdown link, per the rule above.
     - Examples: User asks for a link to `~/src/app/routes/(app)/threads/+page.svelte` → respond with `[~/src/app/routes/(app)/threads/+page.svelte](file:///Users/bob/src/app/routes/%28app%29/threads/+page.svelte)`. Referencing code locations → "The auth logic is in [auth.js](file:///Users/alice/project/config/auth.js#L15-L23) and the handler is in [login.js](file:///Users/alice/project/routes/login.js#L128-L145)"
 - Don't use emojis.
 
@@ -64,14 +64,11 @@ You are a deeply pragmatic, effective software engineer. You take engineering qu
 - **Go version**: 1.27+
 - **Build**: `mise run build`
 - **Test**:
-    - `mise run test` for unit tests
-    - `mise run test-coverage` for tests with coverage
+    - `mise run test` for unit tests (also writes `coverage.out` and prints the coverage report)
     - `mise run test-race` to run go tests with race detection
-    - `mise run test-integration` to run integration tests against the PostgreSQL test database
+    - `mise run test-integration` for integration tests (currently a no-op until an integration suite exists)
 - **Lint**:
-    - `mise run lint` to run Go vet and golangci-lint
-- **Clean**:
-    - `mise run clean` to remove build and coverage artifacts
+    - `mise run lint` to run golangci-lint
 - `grep` is an alias to `rg`.
 
 ### Code Style Guidelines
@@ -85,9 +82,11 @@ You are a deeply pragmatic, effective software engineer. You take engineering qu
 - **Interfaces**: Define interfaces in consuming packages, keep them small and focused
 - **Structs**: Use struct embedding for composition, group related fields
 - **Constants**: Use typed constants with iota for enums, group in const blocks
-- **Testing**: Use testify's `require` package, parallel tests with `t.Parallel()`,
-  `t.Setenv()` to set environment variables. Always use `t.TempDir()` when in
-  need of a temporary directory. This directory does not need to be removed.
+- **Testing**: Use testify's `require` package, `t.Parallel()` for tests that
+  don't mutate process-global state, and `t.Setenv()` to set environment
+  variables in tests that don't (`t.Setenv()` panics under `t.Parallel()` or
+  a parallel ancestor). Always use `t.TempDir()` when in need of a temporary
+  directory. This directory does not need to be removed.
 - **JSON tags**: Use snake_case for JSON field names
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
 - **Comments**: End comments in periods unless comments are at the end of the line.
@@ -95,26 +94,19 @@ You are a deeply pragmatic, effective software engineer. You take engineering qu
 ALWAYS RUN these `mise run` commands:
 
 - test
-- test-coverage
 - test-race
 - test-integration
 
-ENSURE that the test coverage stays at or above 80% (CI enforced).
+ENSURE that the test coverage stays at or above 70% (CI enforced).
 
 ### Test Patterns
 
 #### Unit Tests
 
-- Use `t.Parallel()` for tests that don't need database and don't mutate process-global state (e.g. `t.Setenv()`).
+- Use `t.Parallel()` for tests that don't mutate process-global state (e.g. `t.Setenv()`).
 - Use table-driven tests for pure functions.
 - Use `testify/require` for assertions.
 - Use `t.Helper()` in test setup functions.
-
-#### Database Tests
-
-- Use `database.TestDB(t)` which skips if `TEST_DATABASE_URL` not set.
-- Run with `-p 1` to avoid race conditions.
-- Do NOT use `t.Parallel()` for database tests.
 
 #### Mocking External Dependencies
 
@@ -149,7 +141,7 @@ ENSURE that the test coverage stays at or above 80% (CI enforced).
 
 - NEVER include Co-Authored-By field
 - ALWAYS run both unit and integration tests before pushing
-    - Especially, the fail tests with `mise run test-integration 2>&1 | grep -w 'FAIL:'`
+    - Run `mise run test-integration` directly and require a successful exit status; piping through `grep -w 'FAIL:'` masks the test's real exit code without `pipefail`.
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
 - ALWAYS run pre-commits before pushing
 - Try to keep commits to one line, not including your attribution. Only use

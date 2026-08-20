@@ -130,8 +130,8 @@ func TestSanitizeHTTPClientError_RedactsURLAndPreservesType(t *testing.T) {
 	}
 
 	safeErr := sanitizeHTTPClientError(err)
-	var urlErr *url.Error
-	if !errors.As(safeErr, &urlErr) {
+	urlErr, ok := errors.AsType[*url.Error](safeErr)
+	if !ok {
 		t.Fatalf("expected *url.Error, got %T", safeErr)
 	}
 	if strings.Contains(urlErr.URL, "finnhub-secret") {
@@ -166,8 +166,8 @@ func TestSanitizeHTTPClientError_UnchangedURLReturnsSameError(t *testing.T) {
 	}
 
 	safeErr := sanitizeHTTPClientError(original)
-	var got *url.Error
-	if !errors.As(safeErr, &got) {
+	got, ok := errors.AsType[*url.Error](safeErr)
+	if !ok {
 		t.Fatalf("expected *url.Error, got %T", safeErr)
 	}
 	if got != original {
@@ -183,8 +183,8 @@ func TestSanitizeHTTPClientError_RedactsNestedError(t *testing.T) {
 	}
 
 	safeErr := sanitizeHTTPClientError(err)
-	var urlErr *url.Error
-	if !errors.As(safeErr, &urlErr) {
+	urlErr, ok := errors.AsType[*url.Error](safeErr)
+	if !ok {
 		t.Fatalf("expected *url.Error, got %T", safeErr)
 	}
 	if strings.Contains(urlErr.Err.Error(), "nested-secret") {
@@ -199,7 +199,7 @@ func TestFetchDailyLeetCode(t *testing.T) {
 	mockResponse := graphQLResponse{}
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Title = "Two Sum"
 	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.TitleSlug = "two-sum"
-	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Difficulty = "Easy" //nolint:goconst
+	mockResponse.Data.ActiveDailyCodingChallengeQuestion.Question.Difficulty = "Easy"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

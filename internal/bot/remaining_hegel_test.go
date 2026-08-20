@@ -125,7 +125,7 @@ func TestFormatLeetCodeMessage_NeverPanics(t *testing.T) {
 			Title:     hegel.Draw(ht, hegel.Text().MaxSize(40)),
 			TitleSlug: hegel.Draw(ht, hegel.Text().MaxSize(40)),
 			Difficulty: hegel.Draw(ht, hegel.OneOf(
-				hegel.SampledFrom([]string{"Easy", "Medium", "Hard", ""}), //nolint:goconst
+				hegel.SampledFrom([]string{"Easy", "Medium", "Hard", ""}),
 				hegel.Text().MaxSize(10),
 			)),
 		}

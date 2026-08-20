@@ -662,8 +662,8 @@ func getHistoricalRangeWithContext(ctx context.Context, apiKey string, params *d
 // tryAdjustRangeFromDatabento422 shifts the query window into Databento's
 // available schema range for supported 422 cases, allowing one safe retry.
 func tryAdjustRangeFromDatabento422(params *dbn_hist.SubmitJobParams, err error, days int) (dbn_hist.SubmitJobParams, bool) {
-	var statusErr *httpStatusError
-	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusUnprocessableEntity {
+	statusErr, ok := errors.AsType[*httpStatusError](err)
+	if !ok || statusErr.StatusCode != http.StatusUnprocessableEntity {
 		return *params, false
 	}
 

@@ -99,8 +99,7 @@ func sanitizeHTTPClientError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		safeURL := appotel.RedactSensitiveText(urlErr.URL)
 		safeNestedErr := appotel.SanitizeError(urlErr.Err)
 		if safeURL != urlErr.URL || errorMessageChanged(urlErr.Err, safeNestedErr) {

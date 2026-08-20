@@ -1,6 +1,6 @@
 module gitlab.com/yelinaung/csy-helper-bot
 
-go 1.26.1
+go 1.27.0
 
 require (
 	github.com/NimbleMarkets/dbn-go v0.9.1

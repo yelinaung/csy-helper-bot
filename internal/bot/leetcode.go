@@ -135,7 +135,7 @@ func fetchDailyLeetCode(ctx context.Context) (question *LeetCodeQuestion, err er
 
 func formatLeetCodeMessage(question *LeetCodeQuestion) string {
 	difficultyEmoji := map[string]string{
-		"Easy":   "🟩", //nolint:goconst
+		"Easy":   "🟩",
 		"Medium": "🟨",
 		"Hard":   "🟥",
 	}

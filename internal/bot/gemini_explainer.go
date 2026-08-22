@@ -796,6 +796,7 @@ func isBlockedFinishReason(reason genai.FinishReason) bool {
 		genai.FinishReasonMalformedFunctionCall,
 		genai.FinishReasonImageSafety,
 		genai.FinishReasonUnexpectedToolCall,
+		genai.FinishReasonTooManyToolCalls,
 		genai.FinishReasonImageProhibitedContent,
 		genai.FinishReasonNoImage,
 		genai.FinishReasonImageRecitation,

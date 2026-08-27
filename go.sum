@@ -163,3 +163,5 @@ hegel.dev/go/hegel v0.6.25 h1:UzuqOpJWr3dVdAN4oOtISA3ukkV015FLAz35QecWgPM=
 hegel.dev/go/hegel v0.6.25/go.mod h1:SQZksLxpfxeGnV24rgAsAWP1jhMLwbmF1y448HQ1H44=
 hegel.dev/go/hegel v0.6.27 h1:vxvEtiA78G92OuVqK0yeloJ4llN6heSSuLU0psSqmt4=
 hegel.dev/go/hegel v0.6.27/go.mod h1:SQZksLxpfxeGnV24rgAsAWP1jhMLwbmF1y448HQ1H44=
+hegel.dev/go/hegel v0.6.28 h1:VL1tdf7o13pl1Si80BlT4QWBLTpU4pMlZ4d1kjpkn2A=
+hegel.dev/go/hegel v0.6.28/go.mod h1:SQZksLxpfxeGnV24rgAsAWP1jhMLwbmF1y448HQ1H44=

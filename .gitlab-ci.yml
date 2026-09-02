@@ -66,7 +66,7 @@ test:
   # plus gcompat/libgcc glibc-compat shims used to work around the glibc
   # requirement alone, but doesn't avoid this separate musl-specific link
   # failure; a glibc image needs neither the shims nor the workaround.
-  image: golang:1.27@sha256:4013ae0f9e7994f8535c58c811f8f863fbed38b72e0d51e6592156f758d66146
+  image: golang:1.27@sha256:512690a5660563b57d37ecc31129e7f136e831db2aed24a1dbeb8ad7380dc0fa
   tags:
   - playground-bravo
   needs:

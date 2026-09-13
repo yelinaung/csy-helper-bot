@@ -46,7 +46,7 @@ check_secrets:
 
 lint:
   stage: validate
-  image: golangci/golangci-lint:v2.13-alpine@sha256:f600226b7f0dbac30a670b31eb8fb2703c0e1fbc60060fc4d92755188c4edec5
+  image: golangci/golangci-lint:v2.13-alpine@sha256:da1f79b184ff1d98781648407d05a99b9cba7b282aa3416b0a0eac102a3b0557
   tags:
   - playground-bravo
   cache:

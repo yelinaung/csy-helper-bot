@@ -26,6 +26,39 @@ func TestNewHTTPTransport_NilBaseUsesDefault(t *testing.T) {
 	require.NotNil(t, wrapped)
 }
 
+func TestNewHTTPTransportWithFilter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil base uses default", func(t *testing.T) {
+		t.Parallel()
+		wrapped := NewHTTPTransportWithFilter(nil, func(*http.Request) bool { return true })
+		require.NotNil(t, wrapped)
+	})
+
+	t.Run("filter skips and allows requests", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		srv.Start()
+
+		transport := NewHTTPTransportWithFilter(http.DefaultTransport, func(r *http.Request) bool {
+			return r.URL.Path != "/skip"
+		})
+		client := &http.Client{Transport: transport}
+
+		for _, path := range []string{"/keep", "/skip"} {
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			_ = resp.Body.Close()
+		}
+	})
+}
+
 func TestNewHTTPTransport_PreservesContext(t *testing.T) {
 	t.Parallel()
 

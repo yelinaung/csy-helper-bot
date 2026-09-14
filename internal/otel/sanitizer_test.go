@@ -168,3 +168,22 @@ func TestSanitizeError_RedactsAndPreservesUnwrap(t *testing.T) {
 	require.NotContains(t, safeErr.Error(), "finnhub-secret")
 	require.Contains(t, safeErr.Error(), "token=<redacted>")
 }
+
+// TestSanitizedError_UnwrapAndAs exercises the error-interface methods on the
+// sanitizedError wrapper directly. errors.Is/As normally short-circuit through
+// the Is method, so Unwrap and As would otherwise never run.
+func TestSanitizedError_UnwrapAndAs(t *testing.T) {
+	t.Parallel()
+
+	sentinel := &url.Error{Op: "Get", URL: "https://example.com", Err: errors.New("boom")}
+	wrapped := fmt.Errorf("outer: %w", sentinel)
+	safeErr := SanitizeError(fmt.Errorf("access https://example.com/?token=secret: %w", wrapped))
+
+	var sanitized sanitizedError
+	require.ErrorAs(t, safeErr, &sanitized)
+	require.ErrorIs(t, sanitized.Unwrap(), sentinel)
+
+	var got *url.Error
+	require.True(t, sanitized.As(&got))
+	require.Same(t, sentinel, got)
+}

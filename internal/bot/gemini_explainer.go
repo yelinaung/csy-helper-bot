@@ -784,7 +784,8 @@ func isBlockedReason(reason genai.BlockedReason) bool {
 
 func isBlockedFinishReason(reason genai.FinishReason) bool {
 	switch reason {
-	case "", genai.FinishReasonUnspecified, genai.FinishReasonStop, genai.FinishReasonMaxTokens:
+	case "", genai.FinishReasonUnspecified, genai.FinishReasonStop, genai.FinishReasonMaxTokens,
+		genai.FinishReasonContinuation:
 		return false
 	case genai.FinishReasonSafety,
 		genai.FinishReasonRecitation,

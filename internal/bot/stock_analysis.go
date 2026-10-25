@@ -602,9 +602,7 @@ func (a *stockAnalyzer) analyze(ctx context.Context, input *stockAnalysisInput) 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	temp := float32(0.3)
 	config := &genai.GenerateContentConfig{
-		Temperature:     &temp,
 		MaxOutputTokens: a.maxOutputTokens,
 		SafetySettings:  defaultGeminiSafetySettings(),
 		SystemInstruction: &genai.Content{

@@ -37,15 +37,15 @@ If the question or the quoted/replied message contains a link, the bot fetches t
     # optional (defaults to EQUS.MINI)
     DATABENTO_DATASET=EQUS.MINI
     GEMINI_API_KEY=your_gemini_key_here
-    # optional (defaults to gemini-3.5-flash)
-    GEMINI_MODEL=gemini-3.5-flash
+    # optional (defaults to gemini-3.8-flash)
+    GEMINI_MODEL=gemini-3.8-flash
     # optional (defaults to 60)
     GEMINI_TIMEOUT_SECONDS=60
     # Stock analysis (optional — requires GEMINI_API_KEY + EXA_API_KEY)
     STOCK_ANALYSIS_ENABLED=true
     EXA_API_KEY=your_exa_key_here
-    # optional (defaults to GEMINI_MODEL or gemini-3.5-flash)
-    STOCK_ANALYSIS_MODEL=gemini-3.5-flash
+    # optional (defaults to GEMINI_MODEL or gemini-3.8-flash)
+    STOCK_ANALYSIS_MODEL=gemini-3.8-flash
     # optional (defaults to 90)
     STOCK_ANALYSIS_TIMEOUT_SECONDS=90
     # optional (defaults to 5 requests per 300 seconds)
@@ -143,11 +143,11 @@ docker run \
   -e DATABENTO_API_KEY=your_databento_key \
   -e DATABENTO_DATASET=EQUS.MINI \
   -e GEMINI_API_KEY=your_gemini_key \
-  -e GEMINI_MODEL=gemini-3.5-flash \
+  -e GEMINI_MODEL=gemini-3.8-flash \
   -e GEMINI_TIMEOUT_SECONDS=60 \
   -e STOCK_ANALYSIS_ENABLED=true \
   -e EXA_API_KEY=your_exa_key \
-  -e STOCK_ANALYSIS_MODEL=gemini-3.5-flash \
+  -e STOCK_ANALYSIS_MODEL=gemini-3.8-flash \
   -e ALLOWED_GROUP_IDS=-1001234567890 \
   -e ALLOWED_USERNAMES=alice,bob_99 \
   -e LOG_LEVEL=info \
@@ -166,11 +166,11 @@ dokku config:set csy-helper-bot FINNHUB_API_KEY=your_key
 dokku config:set csy-helper-bot DATABENTO_API_KEY=your_databento_key
 dokku config:set csy-helper-bot DATABENTO_DATASET=EQUS.MINI
 dokku config:set csy-helper-bot GEMINI_API_KEY=your_gemini_key
-dokku config:set csy-helper-bot GEMINI_MODEL=gemini-3.5-flash
+dokku config:set csy-helper-bot GEMINI_MODEL=gemini-3.8-flash
 dokku config:set csy-helper-bot GEMINI_TIMEOUT_SECONDS=60
 dokku config:set csy-helper-bot STOCK_ANALYSIS_ENABLED=true
 dokku config:set csy-helper-bot EXA_API_KEY=your_exa_key
-dokku config:set csy-helper-bot STOCK_ANALYSIS_MODEL=gemini-3.5-flash
+dokku config:set csy-helper-bot STOCK_ANALYSIS_MODEL=gemini-3.8-flash
 dokku config:set csy-helper-bot ALLOWED_GROUP_IDS=-1001234567890
 dokku config:set csy-helper-bot ALLOWED_USERNAMES=alice,bob_99
 dokku config:set csy-helper-bot EXPLAIN_RATE_LIMIT_COUNT=5

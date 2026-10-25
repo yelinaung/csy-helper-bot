@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	defaultGeminiModelName = "gemini-3.5-flash"
+	defaultGeminiModelName = "gemini-3.8-flash"
 	defaultExplainTimeout  = 60 * time.Second
 	genAIProviderNameAttr  = "gen_ai.provider.name"
 	genAIRequestModelAttr  = "gen_ai.request.model"
@@ -453,9 +453,7 @@ func doExplain(ctx context.Context, g *geminiExplainer, prompt string, image *im
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	temp := float32(0.2)
 	config := &genai.GenerateContentConfig{
-		Temperature:     &temp,
 		MaxOutputTokens: 10000,
 		SafetySettings:  defaultGeminiSafetySettings(),
 		SystemInstruction: &genai.Content{

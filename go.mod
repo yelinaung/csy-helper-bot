@@ -3,7 +3,7 @@ module gitlab.com/yelinaung/csy-helper-bot
 go 1.27.0
 
 require (
-	github.com/NimbleMarkets/dbn-go v0.10.0
+	github.com/NimbleMarkets/dbn-go v0.11.0
 	github.com/go-analyze/charts v0.6.4
 	github.com/go-telegram/bot v1.27.0
 	github.com/joho/godotenv v1.5.1
@@ -33,7 +33,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/purego v0.12.0-alpha.1.0.20261015130536-d456b1bb95e8 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-analyze/bulk v0.1.6 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect

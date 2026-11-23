@@ -86,6 +86,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 - **Logging**: `rs/zerolog` via a package-global `log.Logger` configured in
   `cmd/csy-helper-bot/main.go` with a `ConsoleWriter` (human-readable, JSON
   internally). No structured telemetry export.
+
 - **Handlers** registered in `internal/bot/bot.go:Run`:
     - `startHandler` (`/start`), `helpHandler` (`/help`), `lcHandler` (`/lc`, `!lc`)
     - `stockHandler` (`!s`, `!s `), `stockAnalysisHandler` (`!sa`, `!sa `)
@@ -95,6 +96,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
     - All registered handlers are wrapped by `requestLoggingMiddleware`
     (`internal/bot/bot.go:171`), which logs the incoming update and enforces
     the group allowlist before dispatching.
+
 - **External calls** (instrumentation targets) with **credential location**:
 
     | Service | Function | Transport | Client | Secret in URL? |
@@ -116,6 +118,7 @@ LeetCode, Exa, Parallel, Gemini, Telegram photo download).
 
     **7 of the 11 HTTP call sites put credentials in the URL** (6 Finnhub +
     1 Telegram). These are the P0 sanitization targets.
+
 - **Lifecycle**: `Run` builds a `signal.NotifyContext` for SIGINT and blocks on
   `b.Start(ctx)`. `main` calls `log.Fatal` on the returned error.
 
@@ -452,6 +455,7 @@ func (w *otelLogWriter) Write(p []byte) (int, error)
 
 - zerolog always emits one JSON object per line followed by `\n`; the writer
   splits on newlines and decodes each line with `encoding/json`.
+
 - Field mapping:
 
     | zerolog JSON key | OTel log record field |
@@ -462,6 +466,7 @@ func (w *otelLogWriter) Write(p []byte) (int, error)
     | every other key | `Record.Attributes` (best-effort type inference: number→Float64, bool→Bool, string→String, object/array→String of raw JSON) |
 
 - `Record.ObservedTimestamp` is set to `time.Now()` to preserve export order.
+
 - **Log-side URL redaction (P0, review #3):** before attaching any attribute
   whose key is `url`, `url.full`, `http.url`, or `request.url`, the bridge
   calls the same `redactURL(string) string` used by the span sanitizer. This
@@ -470,6 +475,7 @@ func (w *otelLogWriter) Write(p []byte) (int, error)
   sanitizer only covers spans. No existing log site logs a
   credential-bearing URL (audited — see [Credential Sanitization](#credential-sanitization-p0));
   this is defense-in-depth.
+
 - **Trace correlation is not possible from the writer alone (P2):**
   `io.Writer.Write` receives bytes, not `context.Context`, so the bridge
   cannot read the active span context. Correlation requires injecting

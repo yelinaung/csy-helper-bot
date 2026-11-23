@@ -540,9 +540,13 @@ Current `maxPromptTotalRuneLen` is 4000 runes. Adding metrics (~400 chars JSON),
 1. **Increase budget to 6000 runes** — `gemini-2.5-flash` supports far larger contexts; 4000 was over-conservative
 2. **Drop priority cascade**: if payload exceeds budget after marshal, drop fields in explicit order:
    1. Set `payload.PriceTarget = nil`, re-marshal, re-check budget
+
    2. Set `payload.Recommendation = nil`, re-marshal, re-check budget
+
    3. Set `payload.Earnings = nil`, re-marshal, re-check budget
+
    4. Set `payload.Metrics = nil`, re-marshal, re-check budget
+
    5. Drop news items one at a time from the tail (existing behavior, `stock_analysis.go:243`)
 
       Each step is a top-level assignment followed by `json.MarshalIndent` — not

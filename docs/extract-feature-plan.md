@@ -141,6 +141,7 @@ New helper `extractQuestionURLs(message, question, quoted) (urls []string, strip
     text scan sees anchor text, not the URL — so the selected source's array
     must not be skipped. Reuse `utf16EntityRangeToByteRange` (already in
     ask.go) to slice entity text; for `text_link`, use `entity.URL`.
+
 2. **Skip bot-owned quoted messages** — when `isQuotedFromBot(message)`
    (already in ask.go) is true, harvest no URLs from the quoted text. The
    bot's own answers carry citation links from the search path; a user
@@ -155,9 +156,11 @@ New helper `extractQuestionURLs(message, question, quoted) (urls []string, strip
     the bot. A user manually highlighting bot text and typing `@bot explain
     this` will still trigger extraction of URLs inside that quote. This is a
     Telegram API limitation; the Quote case is noted in Out of scope.
+
 3. **Fallback text scan** — tokens starting `http://` or `https://` in the
    question and quoted text, for messages arriving without entities (some
    test paths and edge cases).
+
 4. Normalize: prepend `https://` to scheme-less entity URLs; `url.Parse`
    must succeed, scheme must end up http/https, host non-empty; drop
    obviously local hosts (`localhost`, private IPs) and raw URLs over
@@ -167,6 +170,7 @@ New helper `extractQuestionURLs(message, question, quoted) (urls []string, strip
    surfaces in the response `Errors` and is skipped like any dead link. An
    `http://` retry for scheme-less URLs is out of scope for v1 — users can
    paste the explicit `http://` URL, which passes through unchanged.
+
 5. De-duplicate; cap at `EXTRACT_MAX_URLS` (default 3 — each URL is billed
    and more context dilutes the answer).
 
@@ -196,6 +200,7 @@ Match `parallel_search.go`'s structure exactly:
   already used elsewhere in the package. A unit test covers the disabled
   path (`EXTRACT_ENABLED=false` + key set → `nil`) and the invalid-value
   path (`EXTRACT_ENABLED=banana` → enabled).
+
 - Response structs — unlike `parallelSearchResponse`, the Extract response
   carries per-URL errors, and the struct **must** include them, or
   `encoding/json` silently discards them:
@@ -221,15 +226,18 @@ Match `parallel_search.go`'s structure exactly:
     `session_id`; v1 ignores them. Test fixtures must use this documented
     shape — a made-up `message` field would decode to empty values in
     production and defeat the per-URL diagnostics this struct exists for.
+
 - `extract(ctx, urls []string, objective string) ([]parallelExtractResult, error)`
   following `search()`: span, per-call context timeout, `x-api-key` header,
   drain-body-before-close, bounded error body (reuse
   `maxParallelErrorBodyBytes`), non-200 → error. Reuse `parallelHTTPClient`.
+
 - `extract()` logs each entry in `Errors` (`log.Warn` with host,
   `error_type`, `http_status_code`, and bounded `content`) and skips it —
   not fatal, since one dead link shouldn't kill a two-link question. A
   step-1 unit test asserts a mixed success/error response still returns the
   successful results.
+
 - `sanitizeParallelExtractResults()` follows `sanitizeParallelResults()`
   for per-field sanitization (`sanitizeForPrompt` on title and excerpts)
   but with a **stricter keep rule**: a result must have at least one

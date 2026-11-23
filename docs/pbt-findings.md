@@ -15,14 +15,17 @@ mode.
 ### Bug 1 — `priceTargetToSanitized` emits `+Inf`, breaking JSON marshal
 
 - **Location:** `internal/bot/stock_analysis.go:417`
+
 - **Symptom:** When `pt.TargetMean` is `+Inf` and `currentPrice > 0`,
   `UpsidePct` becomes `+Inf`. The subsequent `json.MarshalIndent` at
   `stock_analysis.go:431` fails with `json: unsupported value: +Inf`,
   aborting the entire `!sa` prompt build.
+
 - **Root cause:** The guard is `if currentPrice > 0 && pt.TargetMean > 0`.
   `+Inf > 0` is true, so the guard passes. `NaN > 0` and `-Inf > 0` are
   false, so they accidentally produce `UpsidePct = 0` and are safe — but
   `+Inf` is not.
+
 - **Repro output:**
 
     UpsidePct = +Inf isInf=true isNaN=false
@@ -35,14 +38,17 @@ mode.
     v=+Inf err=json: unsupported value: +Inf
     v=-Inf err=json: unsupported value: -Inf
     v=NaN err=json: unsupported value: NaN
+
 - **Why the existing test misses it:** `FuzzPriceTargetUpsidePct`
   (`fuzz_test.go:415`) asserts `!IsInf` and that `json.Marshal` succeeds, but
   Go's native fuzzer rarely generates `+Inf` from `float64` bit-flipping.
   Hegel's `hegel.Floats[float64]()` includes Inf and NaN by default and
   would surface this on the first run.
+
 - **Impact:** Any `!sa` request where Finnhub returns a `+Inf` target (or
   where upstream parsing produces one) fails with a generic
   "Failed to analyze %s" message instead of degrading gracefully.
+
 - **Fix:** Guarding only the inputs to `UpsidePct` is insufficient on two
   fronts. First, `priceTargetToSanitized` copies `TargetHigh`, `TargetLow`,
   `TargetMean`, `TargetMedian`, and `CurrentPrice` directly into the
@@ -97,10 +103,12 @@ mode.
 
 - **Location:** `internal/bot/ask.go:411` (with `isTelegramUsernameChar`
   at `ask.go:449`).
+
 - **Symptom:** A bare `@bot_mention` preceded by a character whose
   lowercase form has a different UTF-8 byte length is silently not
   recognized. The handler then treats the message as not addressing the
   bot and drops it.
+
 - **Root cause:** The function lowercases the entire text with
   `strings.ToLower`, searches for the lowercase mention in `lowerText`,
   then maps the byte offsets back into the original `text`.
@@ -111,20 +119,24 @@ mode.
     After the shift, `text[start:end]` no longer aligns with the mention,
     `hasMentionBoundaries` is called with wrong indices, and the match is
     rejected.
+
 - **Repro output:**
 
     capital-sharp-s prefix ok=false mention="" suffix=""
     capital-I-dot prefix ok=false mention="" suffix=""
     ascii baseline ok=true mention="@csy_helper_dev_bot" suffix=""
+
 - **Why the existing test misses it:** `FuzzMentionAndSuffixAtEntity` and
   `FuzzShouldHandleAskMention` (`fuzz_test.go:56`, `:77`) operate on the
   entity-based path (`mentionAndSuffixAtEntity`), which uses
   `utf16EntityRangeToByteRange` and is correct. The fallback path
   (`mentionAndSuffixFromText`) is only reached when Telegram omits the
   mention entity, and no current test exercises it with Unicode prefixes.
+
 - **Impact:** Users in locales that use `İ`, `ẞ`, and similar characters
   cannot address the bot when the mention entity is missing. The bug is
   silent — no error, just a dropped message.
+
 - **Fix:** Search in `text` directly with a case-insensitive scan that
   recomputes indices against `text` rather than `lowerText`. Or, simpler:
   walk `text` rune-by-rune and compare lowercased runes against the
@@ -133,10 +145,12 @@ mode.
 ### Bug 3 — `memoryRateLimiter.allow` returns `retryAfter > window` on clock skew
 
 - **Location:** `internal/bot/rate_limiter.go:72`
+
 - **Symptom:** When the clock moves backwards (NTP step, container clock
   jump, non-monotonic `time.Now()`), `retryAfter` exceeds `r.window`.
   The caller surfaces this to the user as "try again in 15s" for a 10s
   window.
+
 - **Root cause:**
 
     retryAfter := r.window - now.Sub(entry.windowStart)
@@ -145,16 +159,20 @@ mode.
     `max(..., 0)` floors but does not cap. If `now` is before
     `entry.windowStart`, `now.Sub(...)` is negative and `retryAfter` becomes
     `window + |skew|`.
+
 - **Repro output:**
 
     second at t0: ok=false retry=10s
     clock-skew third: ok=false retry=15s window=10s retry>window=true
     BUG CONFIRMED: retryAfter (15s) > window (10s) on backwards clock.
+
 - **Why the existing test misses it:** `TestMemoryRateLimiterAllow` and
   the sweep tests always move time forward. No current test injects a
   backwards clock.
+
 - **Impact:** Misleading user-facing retry durations. Not a crash, but a
   correctness bug in the rate-limit contract.
+
 - **Fix:** `retryAfter = clamp(retryAfter, 0, r.window)` — i.e.
   `min(max(retryAfter, 0), r.window)`. Consider also documenting that
   callers should pass a monotonic clock.
@@ -163,6 +181,7 @@ mode.
 
 - **Location:** `internal/bot/telegram_markdown.go:115` (called from
   `stock_analysis.go:624`).
+
 - **Symptom:** The plain-text fallback returns untrusted model output with
   NUL bytes and invalid UTF-8 sequences passed through unchanged. Its
   sibling `formatTelegramMarkdown` (`telegram_markdown.go:22`) sanitizes
@@ -170,9 +189,11 @@ mode.
   commented "so Telegram never receives malformed text"); the plain path
   skips that step entirely and goes straight to
   `normalizeGeneratedTelegramMarkdown` + regex replacement.
+
 - **Root cause:** Missing the `strings.ToValidUTF8(text, "�")` and
   `strings.ReplaceAll(text, "\x00", "")` calls that the markdown path
   performs.
+
 - **Repro output:**
 
     in = "hello\x00world\xff bad"
@@ -180,6 +201,7 @@ mode.
     formatTelegramMarkdown:    nul=false validUTF8=true
     BUG: plainTelegramMarkdownText leaks NUL byte
     BUG: plainTelegramMarkdownText leaks invalid UTF-8
+
 - **Why the existing test misses it:** `FuzzFormatAndNormalizeMarkdown`
   (`fuzz_test.go:375`) asserts the no-NUL / valid-UTF-8 contract for
   `formatTelegramMarkdown` (lines 392-397) but never exercises
@@ -187,10 +209,12 @@ mode.
   `TestPlainTelegramMarkdownText` (`telegram_markdown_test.go:20`) checks
   one well-formed input — it doesn't cover NUL bytes, invalid UTF-8, or
   the safety contract at all.
+
 - **Impact:** Malformed bytes can reach Telegram on the plain-text
   rendering path, which Telegram may reject or mis-render. Same class of
   bug the markdown path was hardened against; the two formatters are
   inconsistent.
+
 - **Fix:** Apply the same sanitization at the top of
   `plainTelegramMarkdownText`:
 
@@ -212,10 +236,12 @@ each tier is by expected value.
 
 - **Target:** `internal/bot/rate_limiter.go` — `allow(key, now)` and
   `sweepLocked(now)` over `map[string]rateEntry`.
+
 - **Why:** This is the single best PBT target in the repo. It's a textbook
   state machine: insert, increment, expire, sweep, with a capacity cap.
   A stateful model test exercises combinations of operations that
   hand-written tests never do.
+
 - **Model:** A `map[string]modelEntry` where `modelEntry{windowStart time.Time;
   count int}`. In Go Hegel, rule methods take exactly one `hegel.TestCase`
   parameter; values are drawn inside the rule body, not passed as arguments.
@@ -239,13 +265,16 @@ each tier is by expected value.
     m.subject.mu.Unlock()
     m.pruneModel(now)
     }
+
 - **Invariants:**
     - `0 <= retryAfter <= r.window` (fails today → bug 3).
     - A key just reset (new window) has `count == 1` in the subject.
     - `len(r.data) <= rateLimitMaxMapSize` after any rule.
     - Subject and model agree on `(ok, retryAfter, count)` after every rule.
+
 - **API:** `hegel.RunStateful(ht, machine)`. See the Go reference's
   stateful-testing section.
+
 - **Generator notes:** Draw `now` as `baseTime + hegel.Integers(-3600, 3600)
     - time.Second` so the clock moves both ways. Draw `key` from
   `hegel.SampledFrom([]string{"a","b","c","d"})` so collisions happen
@@ -277,14 +306,17 @@ each tier is by expected value.
 #### 3. Soundness PBT for `mentionAndSuffixFromText`
 
 - **Target:** `internal/bot/ask.go:411`.
+
 - **Why:** Catches bug 2. The function promises to find `targetMention`
   with non-username-char boundaries; it silently fails for Unicode
   prefixes that change byte length under `ToLower`.
+
 - **Property:** For `text = prefix + mention + suffix` where `prefix` and
   `suffix` are arbitrary Unicode from `hegel.Text()` and `prefix` does not
   end with an `isTelegramUsernameChar` and `suffix` does not start with
   one, `mentionAndSuffixFromText(text, mention)` returns
   `(mention, suffix, true)`.
+
 - **Generator:** Build the text inline:
 
     mention := hegel.Draw(ht, hegel.Just("@csy_helper_dev_bot"))
@@ -295,6 +327,7 @@ each tier is by expected value.
 
     Use full `hegel.Text()` (not ASCII) so `İ`, `ẞ`, combining marks, and
     emoji all appear.
+
 - **Commutativity add-on:** The result should not depend on bytes before
   the mention. Generate two prefixes of equal "boundary class" and assert
   the function returns the same `mention` and `suffix`.

@@ -24,10 +24,15 @@ If the question or the quoted/replied message contains a link, the bot fetches t
 ## Setup
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token
+
 2. Get a free [Finnhub](https://finnhub.io/) API key for stock quotes
+
 3. Get a [Databento](https://databento.com/) API key for historical stock data
+
 4. Get an [Exa](https://exa.ai/) API key for web search (the `!sa` command requires it)
+
 5. (Optional) Get a [Parallel](https://parallel.ai/) API key so answers about current events draw on fresh web search results
+
 6. Create a `.env` file:
 
     ```text
@@ -198,6 +203,7 @@ Telegram allows only one long-polling connection per bot token. This error means
 **Solutions:**
 
 1. Stop any local bot instances before deploying
+
 2. Ensure only one container is running on Dokku:
 
     ```bash
